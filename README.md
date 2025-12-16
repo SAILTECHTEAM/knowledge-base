@@ -2,6 +2,12 @@
 
 Welcome to the internal knowledge base. This guide provides an overview of the available content and direct links to the resources.
 
+## 🌐 Language Selection
+
+- **English** (Current) - This document
+- [简体中文](README-zh-CN.md) - Simplified Chinese
+- [繁體中文](README-zh-HK.md) - Traditional Chinese
+
 ## 📁 Contents
 
 ### 🤖 Deep Learning
@@ -26,25 +32,15 @@ A comprehensive collection of computer vision learning materials focusing on YOL
 Comprehensive Python development guides covering modern Python packaging and dependency management tools.
 
 **Available Resources:**
-
-#### Pyproject Guide
-- [Pyproject Guide (English)](python-tutorial/pyproject-guide-en.md) - Modern Python packaging with pyproject.toml
-- [Pyproject Guide (Simplified Chinese)](python-tutorial/pyproject-guide-zh-CN.md) - 现代Python打包指南
-- [Pyproject Guide (Traditional Chinese)](python-tutorial/pyproject-guide-zh-HK.md) - 現代Python打包指南
-
-#### UV Guide
-- [UV Guide (English)](python-tutorial/uv-guide-en.md) - Fast Python package and project manager
-- [UV Guide (Simplified Chinese)](python-tutorial/uv-guide-zh-CN.md) - UV快速Python包管理器
-- [UV Guide (Traditional Chinese)](python-tutorial/uv-guide-zh-HK.md) - UV快速Python包管理器
+- [Pyproject Guide](python-tutorial/pyproject-guide-en.md) - Modern Python packaging with pyproject.toml
+- [UV Guide](python-tutorial/uv-guide-en.md) - Fast Python package and project manager
 
 ### 📚 Git Tutorial
 
 Comprehensive Git engineering guides covering best practices, workflows, and advanced Git operations.
 
 **Available Resources:**
-- [Git Engineering Guide (English)](git-tutorial/git-engineering-guide-en.md) - Complete Git guide in English
-- [Git Engineering Guide (Traditional Chinese)](git-tutorial/git-engineering-guide-zh-HK.md) - 繁體中文版本
-- [Git Engineering Guide (Simplified Chinese)](git-tutorial/git-engineering-guide.md) - 简体中文版本
+- [Git Engineering Guide](git-tutorial/git-engineering-guide-en.md) - Complete Git guide
 
 ## 🚀 Quick Navigation
 
