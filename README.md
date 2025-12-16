@@ -21,6 +21,22 @@ A comprehensive collection of computer vision learning materials focusing on YOL
 - [YOLOv8 Notes](deep_learning/cv/YOLOv8_Note_v1.pdf) - Ultralytics' latest YOLO implementation
 - [YOLOv9 Notes](deep_learning/cv/YOLOv9_Note_v1.pdf) - Learning What You Want to Learn
 
+### 🐍 Python Tutorial
+
+Comprehensive Python development guides covering modern Python packaging and dependency management tools.
+
+**Available Resources:**
+
+#### Pyproject Guide
+- [Pyproject Guide (English)](python-tutorial/pyproject-guide-en.md) - Modern Python packaging with pyproject.toml
+- [Pyproject Guide (Simplified Chinese)](python-tutorial/pyproject-guide-zh-CN.md) - 现代Python打包指南
+- [Pyproject Guide (Traditional Chinese)](python-tutorial/pyproject-guide-zh-HK.md) - 現代Python打包指南
+
+#### UV Guide
+- [UV Guide (English)](python-tutorial/uv-guide-en.md) - Fast Python package and project manager
+- [UV Guide (Simplified Chinese)](python-tutorial/uv-guide-zh-CN.md) - UV快速Python包管理器
+- [UV Guide (Traditional Chinese)](python-tutorial/uv-guide-zh-HK.md) - UV快速Python包管理器
+
 ### 📚 Git Tutorial
 
 Comprehensive Git engineering guides covering best practices, workflows, and advanced Git operations.
@@ -33,6 +49,7 @@ Comprehensive Git engineering guides covering best practices, workflows, and adv
 ## 🚀 Quick Navigation
 
 - **For Computer Vision enthusiasts**: Start with [CNN Notes](deep_learning/cv/CNN_Note_v2.pdf) for foundational knowledge, then progress through the YOLO series chronologically
+- **For Python Developers**: Learn modern Python packaging with the [Pyproject Guide](python-tutorial/) and fast dependency management with the [UV Guide](python-tutorial/)
 - **For Developers**: Choose your preferred language and dive into the [Git Engineering Guide](git-tutorial/) to master version control workflows
 - **For Researchers**: The YOLO series provides a comprehensive evolution of object detection algorithms from v1 to v9
 
@@ -42,6 +59,12 @@ Comprehensive Git engineering guides covering best practices, workflows, and adv
 2. **Direct Access**: Click on any link to directly access the resource
 3. **Progressive Learning**: Follow the suggested order within each category for structured learning
 4. **Reference**: Use these materials as quick references for specific topics
+
+### 🎯 Recommended Learning Paths
+
+- **Python Development**: Start with [Pyproject Guide](python-tutorial/pyproject-guide-en.md) to understand modern packaging, then explore [UV Guide](python-tutorial/uv-guide-en.md) for fast dependency management
+- **Machine Learning**: Combine Python tutorials with [Deep Learning materials](deep_learning/cv/) for a complete ML development workflow
+- **Software Engineering**: Integrate [Git tutorials](git-tutorial/) with Python guides for professional development practices
 
 ---
 
