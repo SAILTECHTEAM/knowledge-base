@@ -41,6 +41,7 @@ Comprehensive Git engineering guides covering best practices, workflows, and adv
 
 **Available Resources:**
 - [Git Engineering Guide](git-tutorial/git-engineering-guide-en.md) - Complete Git guide
+- [Git Hooks Guide](git-tutorial/git-hooks-guide-en.md) - Git hooks, Husky, Commitizen, pre-commit usage and examples
 
 ## 🚀 Quick Navigation
 

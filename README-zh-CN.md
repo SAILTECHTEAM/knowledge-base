@@ -35,6 +35,7 @@
 
 **可用资源：**
 - [Git 工程指南](git-tutorial/git-engineering-guide.md) - 完整的 Git 指南
+- [Git Hooks 指南](git-tutorial/git-hooks-guide-zh-CN.md) - Git 钩子、Husky、Commitizen、pre-commit 使用与示例
 
 ## 🚀 快速导航
 
