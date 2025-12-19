@@ -32,6 +32,7 @@ A comprehensive collection of computer vision learning materials focusing on YOL
 Comprehensive Python development guides covering modern Python packaging, dependency management, and code quality tools.
 
 **Available Resources:**
+- [Python Engineering Guide](python-tutorial/python-engineering-guide-en.md) - Comprehensive modern Python development practices
 - [Pyproject Guide](python-tutorial/pyproject-guide-en.md) - Modern Python packaging with pyproject.toml
 - [UV Guide](python-tutorial/uv-guide-en.md) - Fast Python package and project manager
 - [Python Tools Introduction](python-tutorial/python-tools-introduction-en.md) - Overview of Python code quality tools (Pylint, Black, MyPy, Flake8, and Ruff)
@@ -60,7 +61,7 @@ Comprehensive Git engineering guides covering best practices, workflows, and adv
 
 ### 🎯 Recommended Learning Paths
 
-- **Python Development**: Start with [Pyproject Guide](python-tutorial/pyproject-guide-en.md) to understand modern packaging, explore [UV Guide](python-tutorial/uv-guide-en.md) for fast dependency management, and learn about code quality tools with [Python Tools Introduction](python-tutorial/python-tools-introduction-en.md)
+- **Python Development**: Start with [Python Engineering Guide](python-tutorial/python-engineering-guide-en.md) for comprehensive modern practices, then explore [Pyproject Guide](python-tutorial/pyproject-guide-en.md) to understand modern packaging, [UV Guide](python-tutorial/uv-guide-en.md) for fast dependency management, and [Python Tools Introduction](python-tutorial/python-tools-introduction-en.md) for code quality tools
 - **Machine Learning**: Combine Python tutorials with [Deep Learning materials](deep_learning/cv/) for a complete ML development workflow
 - **Software Engineering**: Integrate [Git tutorials](git-tutorial/) with Python guides for professional development practices
 

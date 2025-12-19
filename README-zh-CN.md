@@ -26,6 +26,7 @@
 涵盖现代 Python 打包、依赖管理和代码质量工具的综合 Python 开发指南。
 
 **可用资源：**
+- [Python 工程指南](python-tutorial/python-engineering-guide-zh-CN.md) - 全面的现代 Python 开发实践
 - [Pyproject 指南](python-tutorial/pyproject-guide-zh-CN.md) - 使用 pyproject.toml 的现代 Python 打包
 - [UV 指南](python-tutorial/uv-guide-zh-CN.md) - 快速的 Python 包和项目管理器
 - [Python 工具简介](python-tutorial/python-tools-introduction-zh-CN.md) - Python 代码质量工具概览（Pylint、Black、MyPy、Flake8 和 Ruff）
@@ -54,7 +55,7 @@
 
 ### 🎯 推荐学习路径
 
-- **Python 开发**：从 [Pyproject 指南](python-tutorial/pyproject-guide-zh-CN.md) 开始了解现代打包，探索 [UV 指南](python-tutorial/uv-guide-zh-CN.md) 进行快速依赖管理，并通过 [Python 工具简介](python-tutorial/python-tools-introduction-zh-CN.md) 学习代码质量工具
+- **Python 开发**：从 [Python 工程指南](python-tutorial/python-engineering-guide-zh-CN.md) 开始学习全面的现代实践，然后通过 [Pyproject 指南](python-tutorial/pyproject-guide-zh-CN.md) 了解现代打包，通过 [UV 指南](python-tutorial/uv-guide-zh-CN.md) 进行快速依赖管理，并通过 [Python 工具简介](python-tutorial/python-tools-introduction-zh-CN.md) 学习代码质量工具
 - **机器学习**：将 Python 教程与 [深度学习材料](deep_learning/cv/) 结合，获得完整的 ML 开发工作流程
 - **软件工程**：将 [Git 教程](git-tutorial/) 与 Python 指南集成，实现专业开发实践
 
