@@ -23,11 +23,12 @@
 
 ### 🐍 Python 教程
 
-涵盖现代 Python 打包和依赖管理工具的综合 Python 开发指南。
+涵盖现代 Python 打包、依赖管理和代码质量工具的综合 Python 开发指南。
 
 **可用资源：**
 - [Pyproject 指南](python-tutorial/pyproject-guide-zh-CN.md) - 使用 pyproject.toml 的现代 Python 打包
 - [UV 指南](python-tutorial/uv-guide-zh-CN.md) - 快速的 Python 包和项目管理器
+- [Python 工具简介](python-tutorial/python-tools-introduction-zh-CN.md) - Python 代码质量工具概览（Pylint、Black、MyPy、Flake8 和 Ruff）
 
 ### 📚 Git 教程
 
@@ -40,7 +41,7 @@
 ## 🚀 快速导航
 
 - **计算机视觉爱好者**：从 [CNN 笔记](deep_learning/cv/CNN_Note_v2.pdf) 开始学习基础知识，然后按时间顺序学习 YOLO 系列
-- **Python 开发者**：通过 [Pyproject 指南](python-tutorial/) 学习现代 Python 打包，通过 [UV 指南](python-tutorial/) 学习快速依赖管理
+- **Python 开发者**：通过 [Pyproject 指南](python-tutorial/) 学习现代 Python 打包，通过 [UV 指南](python-tutorial/) 学习快速依赖管理，通过 [Python 工具简介](python-tutorial/) 了解代码质量工具
 - **开发者**：选择您偏好的语言，深入研究 [Git 工程指南](git-tutorial/) 以掌握版本控制工作流程
 - **研究人员**：YOLO 系列提供了从 v1 到 v9 目标检测算法的全面演进
 
@@ -53,7 +54,7 @@
 
 ### 🎯 推荐学习路径
 
-- **Python 开发**：从 [Pyproject 指南](python-tutorial/pyproject-guide-zh-CN.md) 开始了解现代打包，然后探索 [UV 指南](python-tutorial/uv-guide-zh-CN.md) 进行快速依赖管理
+- **Python 开发**：从 [Pyproject 指南](python-tutorial/pyproject-guide-zh-CN.md) 开始了解现代打包，探索 [UV 指南](python-tutorial/uv-guide-zh-CN.md) 进行快速依赖管理，并通过 [Python 工具简介](python-tutorial/python-tools-introduction-zh-CN.md) 学习代码质量工具
 - **机器学习**：将 Python 教程与 [深度学习材料](deep_learning/cv/) 结合，获得完整的 ML 开发工作流程
 - **软件工程**：将 [Git 教程](git-tutorial/) 与 Python 指南集成，实现专业开发实践
 

@@ -29,11 +29,12 @@ A comprehensive collection of computer vision learning materials focusing on YOL
 
 ### 🐍 Python Tutorial
 
-Comprehensive Python development guides covering modern Python packaging and dependency management tools.
+Comprehensive Python development guides covering modern Python packaging, dependency management, and code quality tools.
 
 **Available Resources:**
 - [Pyproject Guide](python-tutorial/pyproject-guide-en.md) - Modern Python packaging with pyproject.toml
 - [UV Guide](python-tutorial/uv-guide-en.md) - Fast Python package and project manager
+- [Python Tools Introduction](python-tutorial/python-tools-introduction-en.md) - Overview of Python code quality tools (Pylint, Black, MyPy, Flake8, and Ruff)
 
 ### 📚 Git Tutorial
 
@@ -46,7 +47,7 @@ Comprehensive Git engineering guides covering best practices, workflows, and adv
 ## 🚀 Quick Navigation
 
 - **For Computer Vision enthusiasts**: Start with [CNN Notes](deep_learning/cv/CNN_Note_v2.pdf) for foundational knowledge, then progress through the YOLO series chronologically
-- **For Python Developers**: Learn modern Python packaging with the [Pyproject Guide](python-tutorial/) and fast dependency management with the [UV Guide](python-tutorial/)
+- **For Python Developers**: Learn modern Python packaging with the [Pyproject Guide](python-tutorial/), fast dependency management with the [UV Guide](python-tutorial/), and code quality tools with the [Python Tools Introduction](python-tutorial/)
 - **For Developers**: Choose your preferred language and dive into the [Git Engineering Guide](git-tutorial/) to master version control workflows
 - **For Researchers**: The YOLO series provides a comprehensive evolution of object detection algorithms from v1 to v9
 
@@ -59,7 +60,7 @@ Comprehensive Git engineering guides covering best practices, workflows, and adv
 
 ### 🎯 Recommended Learning Paths
 
-- **Python Development**: Start with [Pyproject Guide](python-tutorial/pyproject-guide-en.md) to understand modern packaging, then explore [UV Guide](python-tutorial/uv-guide-en.md) for fast dependency management
+- **Python Development**: Start with [Pyproject Guide](python-tutorial/pyproject-guide-en.md) to understand modern packaging, explore [UV Guide](python-tutorial/uv-guide-en.md) for fast dependency management, and learn about code quality tools with [Python Tools Introduction](python-tutorial/python-tools-introduction-en.md)
 - **Machine Learning**: Combine Python tutorials with [Deep Learning materials](deep_learning/cv/) for a complete ML development workflow
 - **Software Engineering**: Integrate [Git tutorials](git-tutorial/) with Python guides for professional development practices
 

@@ -23,11 +23,12 @@
 
 ### 🐍 Python 教程
 
-涵蓋現代 Python 打包和依賴管理工具的綜合 Python 開發指南。
+涵蓋現代 Python 打包、依賴管理和代碼質量工具的綜合 Python 開發指南。
 
 **可用資源：**
 - [Pyproject 指南](python-tutorial/pyproject-guide-zh-HK.md) - 使用 pyproject.toml 的現代 Python 打包
 - [UV 指南](python-tutorial/uv-guide-zh-HK.md) - 快速的 Python 包和專案管理器
+- [Python 工具簡介](python-tutorial/python-tools-introduction-zh-HK.md) - Python 代碼質量工具概覽（Pylint、Black、MyPy、Flake8 和 Ruff）
 
 ### 📚 Git 教程
 
@@ -40,7 +41,7 @@
 ## 🚀 快速導航
 
 - **電腦視覺愛好者**：從 [CNN 筆記](deep_learning/cv/CNN_Note_v2.pdf) 開始學習基礎知識，然後按時間順序學習 YOLO 系列
-- **Python 開發者**：透過 [Pyproject 指南](python-tutorial/) 學習現代 Python 打包，透過 [UV 指南](python-tutorial/) 學習快速依賴管理
+- **Python 開發者**：透過 [Pyproject 指南](python-tutorial/) 學習現代 Python 打包，透過 [UV 指南](python-tutorial/) 學習快速依賴管理，透過 [Python 工具簡介](python-tutorial/) 了解代碼質量工具
 - **開發者**：選擇您偏好的語言，深入研究 [Git 工程指南](git-tutorial/) 以掌握版本控制工作流程
 - **研究人員**：YOLO 系列提供了從 v1 到 v9 目標檢測演算法的全面演進
 
@@ -53,7 +54,7 @@
 
 ### 🎯 推薦學習路徑
 
-- **Python 開發**：從 [Pyproject 指南](python-tutorial/pyproject-guide-zh-HK.md) 開始了解現代打包，然後探索 [UV 指南](python-tutorial/uv-guide-zh-HK.md) 進行快速依賴管理
+- **Python 開發**：從 [Pyproject 指南](python-tutorial/pyproject-guide-zh-HK.md) 開始了解現代打包，然後探索 [UV 指南](python-tutorial/uv-guide-zh-HK.md) 進行快速依賴管理，並透過 [Python 工具簡介](python-tutorial/python-tools-introduction-zh-HK.md) 學習代碼質量工具
 - **機器學習**：將 Python 教程與 [深度學習材料](deep_learning/cv/) 結合，獲得完整的 ML 開發工作流程
 - **軟體工程**：將 [Git 教程](git-tutorial/) 與 Python 指南集成，實現專業開發實踐
 
