@@ -284,8 +284,45 @@ myproject/
 | **语义约束** | `uv add 'package>=1.0.0,<2.0.0'` | `uv add 'requests>=2.28.0,<3.0.0'` |
 | **兼容发布** | `uv add 'package~=1.4.0'` | `uv add 'numpy~=1.24.0'` (>=1.24.0,<1.25.0) |
 | **分离开发依赖** | `uv add --dev pytest black` | 保持开发工具分离 |
-| **可选依赖** | `uv add 'package[extra]'` | `uv add 'fastapi[all]'` |
+| **依赖分组** | `uv add --group docs sphinx` | 创建命名分组（例如 `docs`, `test`, `ci`），保存在 pyproject.toml 中 |
+| **从分组安装 / 选择性同步** | `uv sync --group docs` | 只将特定分组安装到项目环境 |
+| **安装全部 extras 和 dev** | `uv sync --all-extras --dev` | 安装运行时 + extras + 开发工具（CI 中使用需谨慎） |
+| **无-dev（生产）安装** | `uv sync --no-dev` | 仅安装运行时依赖用于生产 |
+| **可选依赖 / Extras** | `uv add 'package[extra]'` | `uv add 'fastapi[all]'` |
 | **Git 依赖** | `uv add "git+https://github.com/user/repo"` | 从开发分支安装 |
+
+使用说明：
+
+- 分组：`uv add --group <name> <pkg>` 会创建命名依赖分组。分组会记录在 pyproject.toml 的 optional-dependencies 或 `tool.uv` 元数据中，取决于项目布局。使用分组可以按环境（docs、test、ci）细分依赖，避免混入运行时依赖。
+
+- 从分组安装：\
+  - `uv sync --group <name>` 只会把该分组的包安装到项目环境（对文档构建或测试运行器很有用）。
+  - `uv sync --no-dev` 只安装运行时依赖（推荐用于生产镜像）。
+  - `uv sync --all-extras --dev` 安装运行时、extras 和开发工具（适合完整开发环境或某些 CI 任务）。
+
+- 常用工作流示例：
+
+```bash
+# 添加 test 和 docs 分组
+uv add --group test pytest-cov
+uv add --group docs sphinx sphinx-rtd-theme
+uv lock
+
+# 在 CI：仅安装运行时依赖
+uv sync --no-dev --frozen
+
+# 在开发者机器：安装全部内容
+uv sync --all-extras --dev
+
+# 仅安装单个分组（例如 docs）
+uv sync --group docs
+```
+
+- 针对特定环境：`uv sync --python .venv-dev` 会安装到指定的 venv 路径。`uv run` 会在运行命令时自动使用托管环境。
+
+- 可重现性：在 Docker/CI 中使用 `uv sync --frozen`（或 `--no-dev --frozen` 用于生产）以确保安装与 uv.lock 精确一致。
+
+- 注意：`uv add --dev` 是添加开发工具的便捷方式；当需要多个命名集合或导出精细的 optional-dependencies 时使用分组。
 
 ### 环境管理
 

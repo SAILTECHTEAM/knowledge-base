@@ -284,8 +284,45 @@ myproject/
 | **Semantic Constraints** | `uv add 'package>=1.0.0,<2.0.0'` | `uv add 'requests>=2.28.0,<3.0.0'` |
 | **Compatible Release** | `uv add 'package~=1.4.0'` | `uv add 'numpy~=1.24.0'` (>=1.24.0,<1.25.0) |
 | **Separate Dev Dependencies** | `uv add --dev pytest black` | Keep dev tools separate |
-| **Optional Dependencies** | `uv add 'package[extra]'` | `uv add 'fastapi[all]'` |
+| **Dependency Groups** | `uv add --group docs sphinx` | Create named groups (e.g. `docs`, `test`, `ci`) stored in pyproject.toml |
+| **Install from groups / selective sync** | `uv sync --group docs` | Install only a specific group into the project environment |
+| **Install all extras and dev** | `uv sync --all-extras --dev` | Install runtime + extras + dev tools (use with care in CI) |
+| **No-dev (production) installs** | `uv sync --no-dev` | Install only runtime dependencies for production |
+| **Optional Dependencies / Extras** | `uv add 'package[extra]'` | `uv add 'fastapi[all]'` |
 | **Git Dependencies** | `uv add "git+https://github.com/user/repo"` | Install from development branch |
+
+Usage notes:
+
+- Groups: `uv add --group <name> <pkg>` creates a named dependency group. Groups are recorded in pyproject.toml under optional-dependencies or tool.uv metadata depending on layout. Use groups to map environment-specific needs (docs, test, ci) without mixing them into runtime deps.
+
+- Installing from groups:\
+  - `uv sync --group <name>` installs only that group's packages into the project's environment (useful for docs or test runners).
+  - `uv sync --no-dev` installs only runtime dependencies (recommended for production images).
+  - `uv sync --all-extras --dev` installs runtime dependencies, extras, and development tools (handy for full developer setups or some CI jobs).
+
+- Common workflow examples:
+
+```bash
+# Add test and docs groups
+uv add --group test pytest-cov
+uv add --group docs sphinx sphinx-rtd-theme
+uv lock
+
+# In CI: install only runtime deps
+uv sync --no-dev --frozen
+
+# On developer machine: install everything
+uv sync --all-extras --dev
+
+# Install a single group (e.g. docs) locally
+uv sync --group docs
+```
+
+- Targeting specific environments: `uv sync --python .venv-dev` installs into a specific venv path. `uv run` will automatically use the managed environment when running commands.
+
+- Reproducibility: use `uv sync --frozen` (or `--no-dev --frozen` for production) in Docker/CI to ensure installations match uv.lock exactly.
+
+- Note: `uv add --dev` is the recommended quick way to add development tools; use groups when you need multiple named sets or when exporting fine-grained optional-dependencies.
 
 ### Environment Management
 

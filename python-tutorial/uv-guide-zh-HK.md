@@ -284,8 +284,45 @@ myproject/
 | **語義約束** | `uv add 'package>=1.0.0,<2.0.0'` | `uv add 'requests>=2.28.0,<3.0.0'` |
 | **相容發布** | `uv add 'package~=1.4.0'` | `uv add 'numpy~=1.24.0'` (>=1.24.0,<1.25.0) |
 | **分離開發依賴** | `uv add --dev pytest black` | 保持開發工具分離 |
-| **可選依賴** | `uv add 'package[extra]'` | `uv add 'fastapi[all]'` |
+| **依賴分組** | `uv add --group docs sphinx` | 建立命名分組（例如 `docs`, `test`, `ci`），保存在 pyproject.toml 中 |
+| **從分組安裝 / 選擇性同步** | `uv sync --group docs` | 只將特定分組安裝到專案環境 |
+| **安裝全部 extras 和 dev** | `uv sync --all-extras --dev` | 安裝執行時 + extras + 開發工具（CI 中使用需謹慎） |
+| **無-dev（生產）安裝** | `uv sync --no-dev` | 僅安裝執行時依賴用於生產 |
+| **可選依賴 / Extras** | `uv add 'package[extra]'` | `uv add 'fastapi[all]'` |
 | **Git 依賴** | `uv add "git+https://github.com/user/repo"` | 從開發分支安裝 |
+
+使用說明：
+
+- 分組：`uv add --group <name> <pkg>` 會建立命名依賴分組。分組會記錄在 pyproject.toml 的 optional-dependencies 或 `tool.uv` 元資料中，取決於專案佈局。使用分組可以按環境（docs、test、ci）細分依賴，避免混入執行時依賴。
+
+- 從分組安裝：\
+  - `uv sync --group <name>` 只會把該分組的套件安裝到專案環境（對文件構建或測試執行器很有用）。
+  - `uv sync --no-dev` 只安裝執行時依賴（建議用於生產映像）。
+  - `uv sync --all-extras --dev` 安裝執行時、extras 和開發工具（適合完整開發環境或某些 CI 任務）。
+
+- 常用工作流示例：
+
+```bash
+# 新增 test 和 docs 分組
+uv add --group test pytest-cov
+uv add --group docs sphinx sphinx-rtd-theme
+uv lock
+
+# 在 CI：僅安裝執行時依賴
+uv sync --no-dev --frozen
+
+# 在開發者機器：安裝全部內容
+uv sync --all-extras --dev
+
+# 僅安裝單個分組（例如 docs）
+uv sync --group docs
+```
+
+- 針對特定環境：`uv sync --python .venv-dev` 會安裝到指定的 venv 路徑。`uv run` 會在運行指令時自動使用托管環境。
+
+- 可重現性：在 Docker/CI 中使用 `uv sync --frozen`（或 `--no-dev --frozen` 用於生產）以確保安裝與 uv.lock 精確一致。
+
+- 注意：`uv add --dev` 是添加開發工具的便捷方式；當需要多個命名集合或導出精細的 optional-dependencies 時使用分組。
 
 ### 環境管理
 
