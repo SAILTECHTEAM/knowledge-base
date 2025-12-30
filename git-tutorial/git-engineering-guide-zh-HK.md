@@ -93,6 +93,9 @@ Closes #123
 - `test`: 新增/修改測試
 - `chore`: 建置、依賴、工具設定
 
+**自動化提交訊息驗證：**
+您可以使用 Git hooks 自動驗證提交訊息格式，確保團隊遵循統一的提交規範。詳細配置請參考 [Git Hooks 完整指南](./git-hooks-guide-zh-HK.md) 中的 Commitizen 和 commitlint 部分。
+
 ---
 
 ## 分支管理策略
@@ -943,9 +946,33 @@ git push origin -d feature/user-profile
 - 需分支為最新
 - 防止分支被刪除
 
+### Git 子模組管理
+
+Git 子模組允許你在主專案中包含並追蹤外部倉庫，同時獨立維護它們的版本歷史。 有關完整的子模組管理、工作流程與最佳實踐，請參閱： [Git 子模組完整指南](./git-submodule-guide-zh-HK.md)
+
 ### Git Hooks 自動化
 
-**Pre-commit hook（`.git/hooks/pre-commit`）：**
+Git hooks 是自動化程式碼品質檢查、測試和標準執行的重要工具。詳細的 hooks 配置和使用指南請參考：
+
+- **中文繁體**: [Git Hooks 完整指南](./git-hooks-guide-zh-HK.md)
+- **English**: [Complete Guide to Git Hooks](./git-hooks-guide-en.md)
+- **中文简体**: [Git Hooks 完全指南](./git-hooks-guide-zh-CN.md)
+
+**快速開始範例：**
+
+**建議用 Husky 管理 hooks：**
+```bash
+npm install husky --save-dev
+npx husky install
+
+# 新增 pre-commit hook
+npx husky add .husky/pre-commit "npm run lint"
+
+# 新增 commit-msg hook
+npx husky add .husky/commit-msg "npx commitlint --edit"
+```
+
+**基礎 Pre-commit hook（`.git/hooks/pre-commit`）：**
 ```bash
 #!/bin/sh
 
@@ -966,17 +993,15 @@ fi
 exit 0
 ```
 
-**建議用 Husky 管理 hooks：**
-```bash
-npm install husky --save-dev
-npx husky install
+**Hook 類型覆蓋：**
+- 原生 Git hooks 配置
+- Husky 現代化管理
+- Commitizen 標準化提交
+- Pre-commit 框架整合
+- 多語言環境支援（JavaScript/TypeScript, Python, C++）
+- 進階配置和最佳實踐
 
-# 新增 pre-commit hook
-npx husky add .husky/pre-commit "npm run lint"
-
-# 新增 commit-msg hook
-npx husky add .husky/commit-msg "npx commitlint --edit"
-```
+詳細配置範例和故障排除請參考上述專門的 hooks 指南。
 
 ---
 

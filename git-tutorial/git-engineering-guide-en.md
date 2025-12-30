@@ -93,6 +93,9 @@ Closes #123
 - `test`: Add/modify tests
 - `chore`: Build, dependencies, tool config
 
+**Automated Commit Message Validation:**
+You can use Git hooks to automatically validate commit message formats, ensuring team adherence to unified commit standards. For detailed configuration, refer to Commitizen and commitlint sections in the [Complete Guide to Git Hooks](./git-hooks-guide-en.md).
+
 ---
 
 ## Branch Management Strategies
@@ -943,9 +946,29 @@ git push origin -d feature/user-profile
 - Require up-to-date branch
 - Prevent branch deletion
 
+### Git Submodules Management
+
+Git submodules allow you to include and track external repositories within your main project while maintaining their version history independently. For comprehensive submodule management, workflows, and best practices, please refer to: [Complete Guide to Git Submodules](./git-submodule-guide-en.md)
+
 ### Git Hooks Automation
 
-**Pre-commit hook (`.git/hooks/pre-commit`):**
+Git hooks are essential tools for automating code quality checks, testing, and standard enforcement. For detailed hooks configuration and usage guides, please refer to [Complete Guide to Git Hooks](./git-hooks-guide-en.md).
+
+**Quick Start Example:**
+
+**Use Husky to manage hooks (recommended):**
+```bash
+npm install husky --save-dev
+npx husky install
+
+# Add pre-commit hook
+npx husky add .husky/pre-commit "npm run lint"
+
+# Add commit-msg hook
+npx husky add .husky/commit-msg "npx commitlint --edit"
+```
+
+**Basic Pre-commit hook (`.git/hooks/pre-commit`):**
 ```bash
 #!/bin/sh
 
@@ -966,17 +989,15 @@ fi
 exit 0
 ```
 
-**Use Husky to manage hooks (recommended):**
-```bash
-npm install husky --save-dev
-npx husky install
+**Hook Coverage:**
+- Native Git hooks configuration
+- Husky modern management
+- Commitizen standardized commits
+- Pre-commit framework integration
+- Multi-language support (JavaScript/TypeScript, Python, C++)
+- Advanced configurations and best practices
 
-# Add pre-commit hook
-npx husky add .husky/pre-commit "npm run lint"
-
-# Add commit-msg hook
-npx husky add .husky/commit-msg "npx commitlint --edit"
-```
+For detailed configuration examples and troubleshooting, please refer to the dedicated hooks guides mentioned above.
 
 ---
 
