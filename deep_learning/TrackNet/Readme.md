@@ -21,16 +21,17 @@ The Trask Aim determined how TrackNet and TSM work and process input differently
 
 | Feature/Method | TrackNet | TSM |
 |----------------|----------|-----|
-| Task Aim | $$max(\partial (x, y, t))/ \partial t$$ | $$P(action|f(t-k. t+k))$$ |
+| Task Aim | $$max(\partial (x, y, t))/ \partial t$$ | $$P(action\|f(t-k. t+k))$$ |
 | Channel Mean | Observation of a pixel in time t | Different Feature (Abstract), LLM Context |
-| Loss Function | $$|Heatmap_{pred} - Heatmap_{gt}|$$ | $$CE(action_{pred}, action_{gt})$$ |
+| Loss Function | $$\|Heatmap_{pred} - Heatmap_{gt}\| $$ | $$CE(action_{pred}, action_{gt})$$ |
 
 # [TrackNetV1](https://sci-hub.st/10.1109/avss.2019.8909871)
 
 ![alt TrackNetV1](figures/TrackNetV1.png?raw=True)
 
-Input: $$W*H*(3Frames(t, t-1, t-2)*RGB)$$
-Output: $$W*H*1$$
+Input: $W \times H \times (\text{3 Frames}(t, t-1, t-2) \times \text{RGB})$
+
+Output: $W \times H \times 1$
 
 ![alt TrackNetV1Output](figures/TrackNetV1Output.png?raw=True)
 
@@ -39,7 +40,14 @@ Probability of depth $$k$$ at $$(i, j)$$
 Softmax given by $$P(i, j, k)=\frac{e^{L(i, j, k)}}{\sum_{t=0}^{255}e^{L(i, j, k)}}$$
 Binary heatmap $$\rightarrow$$ Circle Hough
 
-Loss function: $$H_Q (P)=-\sum Q(i, j, k) log P(i, j, k)$$, where GT $$Q(i, j, k)=\begin{cases} 1 & if G(i, j)=k; \\ 0 & otherwise. \end{cases}$$
+Loss function: $$\ H_Q (P)=-\sum Q(i, j, k) log P(i, j, k) \$$, where GT:
+
+$$Q(i, j, k)=
+  \begin{cases}
+    1 & if G(i, j)=k \\
+    0 & otherwise
+  \end{cases}
+$$
 
 # [TrackNetV2](https://sci-hub.st/10.1109/icpai51961.2020.00023)
 
@@ -49,10 +57,10 @@ Loss function: $$H_Q (P)=-\sum Q(i, j, k) log P(i, j, k)$$, where GT $$Q(i, j, k
 
 Key Changes:
 + VGG Based Encoder-Decoder to U-Net Skip connection
-+ + Less FP, Trajectory jittering
-+ Output $$W*H*1$$ to $$W*H*InputFrames$$
-+ + Better expression with smoother trajectory
-+ + Forcing continuous position prediction, better handle motion blur
+  + Less FP, Trajectory jittering
++ Output $$W \times H \times 1 $$ to $$W \times H \times InputFrames$$
+  + Better expression with smoother trajectory
+  + Forcing continuous position prediction, better handle motion blur
 + Longer warm-up (more stable training)
 
 | V1 | V2 |
@@ -71,11 +79,19 @@ Key Changes:
 + Added Background Image in Input
 + Mixup is used during training
 + Added (b) Rectification module to rectify track misalignment
-+ + Aim to fix object overlapping, Visual blocking/hard identify
+  + Aim to fix object overlapping, Visual blocking/hard identify
 
 ## Rectification module
 
-Height threshold: For a video frame $$i, f<i<b$$ not detecting shuttlecock, tracking interval $$[f+1, b-1]$$, generate inpainting masks according to: $$M_i=\begin{cases} 1 & if p_y^f < \delta, and, p_y^b < \delta \\ 0 & otherwise \end{cases}$$
+Height threshold: For a video frame $$i, f<i<b$$ not detecting shuttlecock, tracking interval $$[f+1, b-1]$$, generate inpainting masks according to: 
+
+$$M_i=
+  \begin{cases}
+    1 & if p_y^f < \delta, and, p_y^b < \delta \\
+    0 & otherwise
+  \end{cases}
+$$
+
 where $$p_y^f$$ and $$p_y^b$$ represent the position of the shuttlecock at frames $$f$$ and $$b$$, the threshold is controlled by $$\delta , \delta=30$$ pixels. Otherwise if detected, $$M_i=0$$.
 
 ## Experiment
