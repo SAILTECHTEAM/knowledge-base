@@ -2,6 +2,12 @@
 
 欢迎来到内部知识库。本指南提供了可用内容的概述和资源的直接链接。
 
+## 🌐 语言选择
+
+- [English](README.md) - 英文
+- **简体中文**（当前） - 本文档
+- [繁體中文](README-zh-HK.md) - 繁体中文
+
 ## 📁 内容
 
 ### 🤖 深度学习
@@ -21,6 +27,20 @@
 - [YOLOv8 笔记](deep_learning/cv/YOLOv8_Note_v1.pdf) - Ultralytics 的最新 YOLO 实现
 - [YOLOv9 笔记](deep_learning/cv/YOLOv9_Note_v1.pdf) - 学习你想学习的内容
 
+#### 追踪
+面向体育和高速应用的目标追踪深度学习技术。
+
+**可用资源：**
+- [TrackNet 笔记](deep_learning/TrackNet/Readme.md) - 用于体育运动中高速和微小目标追踪的深度学习网络
+- [TrackNet 论文](deep_learning/TrackNet/TrackNet.pdf) - TrackNet 原始研究论文
+- [TrackNet 补充笔记](deep_learning/TrackNet/TrackNet(Note).pdf) - 额外笔记与说明
+
+#### 基础概念
+核心深度学习概念与模型文件格式关系。
+
+**可用资源：**
+- [深度学习模型文件格式](deep_learning/fundamental/deep-learning-model-file.md) - PyTorch、ONNX、TensorRT、WTS 文件格式全解
+
 ### 🐍 Python 教程
 
 涵盖现代 Python 打包、依赖管理和代码质量工具的综合 Python 开发指南。
@@ -38,27 +58,15 @@
 **可用资源：**
 - [Git 工程指南](git-tutorial/git-engineering-guide.md) - 完整的 Git 指南
 - [Git Hooks 指南](git-tutorial/git-hooks-guide-zh-CN.md) - Git 钩子、Husky、Commitizen、pre-commit 使用与示例
+- [Git 子模块指南](git-tutorial/git-submodule-guide-zh-CN.md) - 管理外部仓库的完整子模块指南
 
-## 🚀 快速导航
+### 🏗️ 基础设施
 
-- **计算机视觉爱好者**：从 [CNN 笔记](deep_learning/cv/CNN_Note_v2.pdf) 开始学习基础知识，然后按时间顺序学习 YOLO 系列
-- **Python 开发者**：通过 [Pyproject 指南](python-tutorial/) 学习现代 Python 打包，通过 [UV 指南](python-tutorial/) 学习快速依赖管理，通过 [Python 工具简介](python-tutorial/) 了解代码质量工具
-- **开发者**：选择您偏好的语言，深入研究 [Git 工程指南](git-tutorial/) 以掌握版本控制工作流程
-- **研究人员**：YOLO 系列提供了从 v1 到 v9 目标检测算法的全面演进
+基础设施搭建与安全实践指南。
 
-## 📖 如何使用此知识库
-
-1. **按类别浏览**：使用上面的部分导航到您感兴趣的领域
-2. **直接访问**：点击任何链接直接访问资源
-3. **渐进式学习**：按照每个类别中的建议顺序进行结构化学习
-4. **参考**：将这些材料用作特定主题的快速参考
-
-### 🎯 推荐学习路径
-
-- **Python 开发**：从 [Python 工程指南](python-tutorial/python-engineering-guide-zh-CN.md) 开始学习全面的现代实践，然后通过 [Pyproject 指南](python-tutorial/pyproject-guide-zh-CN.md) 了解现代打包，通过 [UV 指南](python-tutorial/uv-guide-zh-CN.md) 进行快速依赖管理，并通过 [Python 工具简介](python-tutorial/python-tools-introduction-zh-CN.md) 学习代码质量工具
-- **机器学习**：将 Python 教程与 [深度学习材料](deep_learning/cv/) 结合，获得完整的 ML 开发工作流程
-- **软件工程**：将 [Git 教程](git-tutorial/) 与 Python 指南集成，实现专业开发实践
+**可用资源：**
+- [零信任教程](infra/zero-trust-tutorial.md) - 连接设备到 Cloudflare Zero Trust 的指南
 
 ---
 
-*最后更新：2025年12月*
+*最后更新：2026年2月*

@@ -2,6 +2,12 @@
 
 歡迎來到內部知識庫。本指南提供了可用內容的概述和資源的直接連結。
 
+## 🌐 語言選擇
+
+- [English](README.md) - 英文
+- [简体中文](README-zh-CN.md) - 簡體中文
+- **繁體中文**（當前） - 本文件
+
 ## 📁 內容
 
 ### 🤖 深度學習
@@ -21,6 +27,20 @@
 - [YOLOv8 筆記](deep_learning/cv/YOLOv8_Note_v1.pdf) - Ultralytics 的最新 YOLO 實現
 - [YOLOv9 筆記](deep_learning/cv/YOLOv9_Note_v1.pdf) - 學習你想學習的內容
 
+#### 追蹤
+面向體育和高速應用的目標追蹤深度學習技術。
+
+**可用資源：**
+- [TrackNet 筆記](deep_learning/TrackNet/Readme.md) - 用於體育運動中高速和微小目標追蹤的深度學習網絡
+- [TrackNet 論文](deep_learning/TrackNet/TrackNet.pdf) - TrackNet 原始研究論文
+- [TrackNet 補充筆記](deep_learning/TrackNet/TrackNet(Note).pdf) - 額外筆記與說明
+
+#### 基礎概念
+核心深度學習概念與模型文件格式關係。
+
+**可用資源：**
+- [深度學習模型文件格式](deep_learning/fundamental/deep-learning-model-file.md) - PyTorch、ONNX、TensorRT、WTS 文件格式全解
+
 ### 🐍 Python 教程
 
 涵蓋現代 Python 打包、依賴管理和代碼質量工具的綜合 Python 開發指南。
@@ -36,29 +56,17 @@
 涵蓋最佳實踐、工作流程和高級 Git 操作的綜合 Git 工程指南。
 
 **可用資源：**
-- [Git 工程指南](git-tutorial/git-engineering-guide-zh-HK.md) - 完整的 Git 指南
-- [Git Hooks 指南](git-tutorial/git-hooks-guide-zh-HK.md) - Git 钩子、Husky、Commitizen、pre-commit 使用與示例
+- [Git 工程指南](git-tutorial/git-engineering-guide.md) - 完整的 Git 指南
+- [Git Hooks 指南](git-tutorial/git-hooks-guide-zh-HK.md) - Git 鉤子、Husky、Commitizen、pre-commit 使用與示例
+- [Git 子模組指南](git-tutorial/git-submodule-guide-zh-HK.md) - 管理外部倉庫的完整子模組指南
 
-## 🚀 快速導航
+### 🏗️ 基礎設施
 
-- **電腦視覺愛好者**：從 [CNN 筆記](deep_learning/cv/CNN_Note_v2.pdf) 開始學習基礎知識，然後按時間順序學習 YOLO 系列
-- **Python 開發者**：透過 [Pyproject 指南](python-tutorial/) 學習現代 Python 打包，透過 [UV 指南](python-tutorial/) 學習快速依賴管理，透過 [Python 工具簡介](python-tutorial/) 了解代碼質量工具
-- **開發者**：選擇您偏好的語言，深入研究 [Git 工程指南](git-tutorial/) 以掌握版本控制工作流程
-- **研究人員**：YOLO 系列提供了從 v1 到 v9 目標檢測演算法的全面演進
+基礎設施搭建與安全實踐指南。
 
-## 📖 如何使用此知識庫
-
-1. **按類別瀏覽**：使用上面的部分導航到您感興趣的領域
-2. **直接存取**：點擊任何連結直接存取資源
-3. **漸進式學習**：按照每個類別中的建議順序進行結構化學習
-4. **參考**：將這些材料用作特定主題的快速參考
-
-### 🎯 推薦學習路徑
-
-- **Python 開發**：從 [Python 工程指南](python-tutorial/python-engineering-guide-zh-HK.md) 開始學習全面的現代實踐，然後透過 [Pyproject 指南](python-tutorial/pyproject-guide-zh-HK.md) 了解現代打包，探索 [UV 指南](python-tutorial/uv-guide-zh-HK.md) 進行快速依賴管理，並透過 [Python 工具簡介](python-tutorial/python-tools-introduction-zh-HK.md) 學習代碼質量工具
-- **機器學習**：將 Python 教程與 [深度學習材料](deep_learning/cv/) 結合，獲得完整的 ML 開發工作流程
-- **軟體工程**：將 [Git 教程](git-tutorial/) 與 Python 指南集成，實現專業開發實踐
+**可用資源：**
+- [零信任教程](infra/zero-trust-tutorial.md) - 連接設備到 Cloudflare Zero Trust 的指南
 
 ---
 
-*最後更新：2025年12月*
+*最後更新：2026年2月*

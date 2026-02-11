@@ -27,6 +27,20 @@ A comprehensive collection of computer vision learning materials focusing on YOL
 - [YOLOv8 Notes](deep_learning/cv/YOLOv8_Note_v1.pdf) - Ultralytics' latest YOLO implementation
 - [YOLOv9 Notes](deep_learning/cv/YOLOv9_Note_v1.pdf) - Learning What You Want to Learn
 
+#### Tracking
+Advanced deep learning techniques for object tracking in sports and high-speed applications.
+
+**Available Resources:**
+- [TrackNet Notes](deep_learning/TrackNet/Readme.md) - Deep learning network for tracking high-speed and tiny objects in sports
+- [TrackNet Paper](deep_learning/TrackNet/TrackNet.pdf) - Original research paper on TrackNet
+- [TrackNet Supplementary Notes](deep_learning/TrackNet/TrackNet(Note).pdf) - Additional notes and explanations
+
+#### Fundamental Concepts
+Core deep learning concepts and model file format relationships.
+
+**Available Resources:**
+- [Deep Learning Model File Formats](deep_learning/fundamental/deep-learning-model-file.md) - Comprehensive guide to PyTorch, ONNX, TensorRT, and WTS file formats
+
 ### 🐍 Python Tutorial
 
 Comprehensive Python development guides covering modern Python packaging, dependency management, and code quality tools.
@@ -44,27 +58,15 @@ Comprehensive Git engineering guides covering best practices, workflows, and adv
 **Available Resources:**
 - [Git Engineering Guide](git-tutorial/git-engineering-guide-en.md) - Complete Git guide
 - [Git Hooks Guide](git-tutorial/git-hooks-guide-en.md) - Git hooks, Husky, Commitizen, pre-commit usage and examples
+- [Git Submodule Guide](git-tutorial/git-submodule-guide-en.md) - Complete guide to Git submodules for managing external repositories
 
-## 🚀 Quick Navigation
+### 🏗️ Infrastructure
 
-- **For Computer Vision enthusiasts**: Start with [CNN Notes](deep_learning/cv/CNN_Note_v2.pdf) for foundational knowledge, then progress through the YOLO series chronologically
-- **For Python Developers**: Learn modern Python packaging with the [Pyproject Guide](python-tutorial/), fast dependency management with the [UV Guide](python-tutorial/), and code quality tools with the [Python Tools Introduction](python-tutorial/)
-- **For Developers**: Choose your preferred language and dive into the [Git Engineering Guide](git-tutorial/) to master version control workflows
-- **For Researchers**: The YOLO series provides a comprehensive evolution of object detection algorithms from v1 to v9
+Guides for infrastructure setup and security practices.
 
-## 📖 How to Use This Knowledge Base
-
-1. **Browse by Category**: Use the sections above to navigate to your area of interest
-2. **Direct Access**: Click on any link to directly access the resource
-3. **Progressive Learning**: Follow the suggested order within each category for structured learning
-4. **Reference**: Use these materials as quick references for specific topics
-
-### 🎯 Recommended Learning Paths
-
-- **Python Development**: Start with [Python Engineering Guide](python-tutorial/python-engineering-guide-en.md) for comprehensive modern practices, then explore [Pyproject Guide](python-tutorial/pyproject-guide-en.md) to understand modern packaging, [UV Guide](python-tutorial/uv-guide-en.md) for fast dependency management, and [Python Tools Introduction](python-tutorial/python-tools-introduction-en.md) for code quality tools
-- **Machine Learning**: Combine Python tutorials with [Deep Learning materials](deep_learning/cv/) for a complete ML development workflow
-- **Software Engineering**: Integrate [Git tutorials](git-tutorial/) with Python guides for professional development practices
+**Available Resources:**
+- [Zero Trust Tutorial](infra/zero-trust-tutorial.md) - Guide to connecting devices to Cloudflare Zero Trust
 
 ---
 
-*Last updated: December 2025*
+*Last updated: February 2026*
