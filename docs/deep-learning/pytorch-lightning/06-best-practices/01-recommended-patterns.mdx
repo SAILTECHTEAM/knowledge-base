@@ -117,17 +117,17 @@ sequenceDiagram
     participant M as LightningModule
 
     T->>M: on_fit_start
-    C->>M: on_fit_start
+    T->>C: on_fit_start
     loop Epoch
         loop Batch
             T->>M: training_step
-            C->>M: on_train_batch_end
+            T->>C: on_train_batch_end
         end
         T->>M: on_validation_epoch_end
-        C->>M: on_validation_epoch_end
+        T->>C: on_validation_epoch_end
     end
     T->>M: on_fit_end
-    C->>M: on_fit_end
+    T->>C: on_fit_end
 ```
 
 :::info[Callback Return Values]

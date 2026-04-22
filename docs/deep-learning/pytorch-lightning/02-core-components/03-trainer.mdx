@@ -222,9 +222,9 @@ trainer = L.Trainer(
 
 ```mermaid
 sequenceDiagram
-    participant M as Model
-    participant DM as DataModule
     participant T as Trainer
+    participant DM as DataModule
+    participant M as Model
     
     T->>DM: setup(stage)
     T->>M: configure_optimizers

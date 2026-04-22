@@ -74,6 +74,7 @@ class MNISTClassifier(nn.Module):
 
 ```python
 import lightning as L
+import torch
 import torch.nn as nn
 
 
@@ -283,9 +284,9 @@ class MNISTClassifier(L.LightningModule):
         images, labels = batch
         outputs = self(images)
         loss = self.criterion(outputs, labels)
-        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True, on_epoch=True)
         acc = self.accuracy(torch.argmax(outputs, dim=1), labels)
-        self.log("val_acc", acc, prog_bar=True)
+        self.log("val_acc", acc, prog_bar=True, on_epoch=True)
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
