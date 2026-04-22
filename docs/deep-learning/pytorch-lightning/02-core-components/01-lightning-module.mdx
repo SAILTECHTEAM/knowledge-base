@@ -1,0 +1,303 @@
+---
+sidebar_position: 1
+title: LightningModule
+description: Deep dive into the LightningModule class and its lifecycle hooks.
+---
+
+# LightningModule
+
+`LightningModule` is the core abstraction that wraps your model. It combines `nn.Module` with lifecycle hooks that Lightning calls during training, validation, testing, and prediction.
+
+Every Lightning training script starts with a class that inherits from `LightningModule`.
+
+## Basic Structure
+
+```python
+import lightning as L
+import torch
+import torch.nn as nn
+
+class MyModel(L.LightningModule):
+    def __init__(self, learning_rate: float = 1e-3):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.encoder = nn.Sequential(
+            nn.Linear(28 * 28, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10)
+        )
+        
+    def forward(self, x):
+        return self.encoder(x.view(x.size(0), -1))
+```
+
+## Lifecycle Hooks
+
+`LightningModule` provides hooks for every stage of the training lifecycle:
+
+| Hook | Stage | Description |
+| :--- | :--- | :--- |
+| `__init__` | Init | Initialize layers, hyperparameters |
+| `configure_optimizers` | Init | Set up optimizers and LR schedulers |
+| `training_step` | Training | Process one training batch |
+| `training_epoch_end` | Training | Aggregate epoch-level results |
+| `validation_step` | Validation | Process one validation batch |
+| `validation_epoch_end` | Validation | Aggregate validation results |
+| `test_step` | Test | Process one test batch |
+| `test_epoch_end` | Test | Aggregate test results |
+| `predict_step` | Inference | Process one batch for prediction |
+
+## Step Methods
+
+### training_step
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    logits = self(x)
+    loss = nn.functional.cross_entropy(logits, y)
+    
+    # Log loss to logger and progress bar
+    self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+    
+    return loss
+```
+
+| Parameter | Type | Description |
+| :--- | :--- | :--- |
+| `batch` | `Any` | One batch from the DataLoader |
+| `batch_idx` | `int` | Index of this batch in the epoch |
+
+Returns: Loss (dict with `"loss"` key) or dictionary containing loss and other items.
+
+### validation_step / test_step / predict_step
+
+```python
+def validation_step(self, batch, batch_idx):
+    x, y = batch
+    logits = self(x)
+    loss = nn.functional.cross_entropy(logits, y)
+    
+    # Log validation metrics
+    self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+    
+    # Calculate accuracy
+    preds = torch.argmax(logits, dim=1)
+    acc = (preds == y).float().mean()
+    self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+```
+
+```python
+def predict_step(self, batch, batch_idx):
+    x, _ = batch
+    logits = self(x)
+    return torch.argmax(logits, dim=1)  # Return predictions
+```
+
+:::tip[Consistent API]
+All step methods share the same signature. `test_step` and `predict_step` are optional — they default to calling `validation_step` if not overridden.
+:::
+
+## configure_optimizers
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+    
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=3, verbose=True
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "monitor": "val_loss",
+        }
+    }
+```
+
+This method is called once before training starts. It can return:
+
+| Return Type | Use Case |
+| :--- | :--- |
+| `Optimizer` | Single optimizer |
+| `List[Optimizer]` | Multiple optimizers (e.g., GANs) |
+| `Dict` | Optimizer + LR scheduler with monitoring |
+| `List[Dict]` | Multiple optimizers with separate schedulers |
+| `configure_optimizers` | Custom class implementing this method |
+
+### Single Optimizer (Most Common)
+
+```python
+def configure_optimizers(self):
+    return torch.optim.Adam(self.parameters(), lr=1e-3)
+```
+
+### With Learning Rate Scheduler
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+    
+    # Step-based scheduler
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=10, eta_min=1e-6
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "interval": "epoch",  # or "step"
+            "frequency": 1
+        }
+    }
+```
+
+### Multiple Optimizers (e.g., GAN)
+
+```python
+def configure_optimizers(self):
+    opt_G = torch.optim.Adam(self.generator.parameters(), lr=1e-3)
+    opt_D = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
+    
+    return [opt_G, opt_D]
+```
+
+## Comparison with nn.Module
+
+| Aspect | `nn.Module` | `LightningModule` |
+| :--- | :--- | :--- |
+| Inheritance | `nn.Module` | Inherits from `nn.Module` |
+| Forward | `forward()` | `forward()` |
+| Parameters | Manually managed | Automatically tracked |
+| Training Loop | You write | Lightning provides |
+| Device Placement | Manual (`model.to(device)`) | Automatic |
+| Logging | Manual | `self.log()` |
+| Checkpointing | Manual | Automatic with callbacks |
+| Optimizer Config | Manual | `configure_optimizers()` |
+
+### Equivalent Code
+
+```python
+# Raw PyTorch
+class MyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = nn.Linear(10, 10)
+    
+    def forward(self, x):
+        return self.layer(x)
+
+# Lightning
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.layer = nn.Linear(10, 10)
+    
+    def forward(self, x):
+        return self.layer(x)
+```
+
+The model code is identical. The difference is what Lightning provides around it.
+
+## Manual Optimization
+
+When you need full control over the training loop — gradient accumulation, multiple optimizers, custom gradient clipping — use manual optimization:
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.layer = nn.Linear(10, 10)
+    
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        output = self(x)
+        loss = nn.functional.cross_entropy(output, y)
+        
+        # Manual optimization: don't let Lightning step the optimizer
+        return loss
+    
+    def training_step_end(self, outputs):
+        # Manual gradientstep happens here
+        self.manual_optimization_step()
+        return outputs
+    
+    def manual_optimization_step(self):
+        # Custom optimization logic
+        self.manual_backward(loss)
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+        self.optimizers().step()
+        self.optimizers().zero_grad()
+```
+
+Enabling manual optimization:
+
+```python
+trainer = Trainer(enable_model_connected_base_training=False)
+```
+
+:::caution[Manual Optimization]
+Only use manual optimization when necessary. It bypasses Lightning's automatic optimization and makes your code harder to scale to distributed training. Consider if the built-in flags (`accumulate_grad_batches`, `gradient_clip_val`) meet your needs first.
+:::
+
+## Full Example: MNIST Classifier
+
+```python
+import lightning as L
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
+
+class MNISTModel(L.LightningModule):
+    def __init__(self, lr: float = 1e-3):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.fc1 = nn.Linear(64 * 7 * 7, 128)
+        self.fc2 = nn.Linear(128, 10)
+        self.lr = lr
+    
+    def forward(self, x):
+        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        x = F.relu(F.max_pool2d(self.conv2(x), 2))
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+    
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+    
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == y).float().mean()
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+```
+
+```python
+# Training
+model = MNISTModel()
+trainer = L.Trainer(max_epochs=10, accelerator="gpu", devices=1)
+trainer.fit(model)
+```
+
+This is all you need — Lightning handles the data loading, device placement, optimization loop, logging, and checkpointing.

@@ -1,0 +1,282 @@
+---
+sidebar_position: 4
+title: Callbacks
+description: Deep dive into the Lightning callback system for extensibility and customization.
+---
+
+# Callbacks
+
+Callbacks are the extensibility system in Lightning. They allow you to inject custom logic at specific points in the training lifecycle without modifying your model code.
+
+## Why Callbacks
+
+In raw PyTorch, you either modify the training loop or insert code imperatively:
+
+```python
+# Raw PyTorch: modify training loop
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        # training step
+        loss.backward()
+        
+        # Custom logic: save checkpoint every 1000 steps
+        if global_step % 1000 == 0:
+            save_checkpoint()
+        
+        # Custom logic: log to wandb
+        wandb.log({"loss": loss})
+        
+        # Custom logic: early stopping
+        if val_loss < best_loss:
+            best_loss = val_loss
+        elif val_loss > best_loss + patience:
+            break
+```
+
+Lightning moves this to callbacks:
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        ModelCheckpoint(...),   # Automatic saving
+        EarlyStopping(...),     # Automatic stopping
+        LearningRateMonitor(), # Track learning rate
+    ]
+)
+```
+
+## Callback Structure
+
+```python
+import lightning as L
+from lightning.callbacks import Callback
+
+class MyCallback(Callback):
+    def on_train_start(self, trainer, pl_module):
+        """Called at the beginning of training."""
+        pass
+    
+    def on_train_epoch_start(self, trainer, pl_module):
+        """Called at the start of each epoch."""
+        pass
+    
+    def on_train_batch_start(
+        self, trainer, pl_module, batch, batch_idx
+    ):
+        """Called before processing a batch."""
+        pass
+    
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx
+    ):
+        """Called after processing a batch."""
+        pass
+    
+    def on_validation_epoch_end(
+        self, trainer, pl_module, logs
+    ):
+        """Called at the end of validation."""
+        pass
+    
+    def on_train_end(self, trainer, pl_module):
+        """Called at the end of training."""
+        pass
+```
+
+## Callback Hooks Reference
+
+### Training Lifecycle Hooks
+
+| Hook | When Called |
+| :--- | :--- |
+| `on_fit_start` | Before training starts |
+| `on_fit_end` | After training ends |
+| `on_pretune_routine_start` | Before tuning starts |
+
+### Epoch Hooks
+
+| Hook | When Called |
+| :--- | :--- |
+| `on_train_epoch_start` | Before epoch starts |
+| `on_train_epoch_end` | After epoch ends |
+| `on_validation_epoch_start` | Before validation starts |
+| `on_validation_epoch_end` | After validation ends |
+
+### Batch Hooks
+
+| Hook | When Called |
+| :--- | :--- |
+| `on_train_batch_start` | Before batch processing |
+| `on_train_batch_end` | After batch processing |
+| `on_validation_batch_start` | Before validation batch |
+| `on_validation_batch_end` | After validation batch |
+
+### Other Hooks
+
+| Hook | When Called |
+| :--- | :--- |
+| `on_save_checkpoint` | Before saving checkpoint |
+| `on_load_checkpoint` | After loading checkpoint |
+| `on_exception` | On exception raised |
+
+## Built-in Callbacks
+
+### ModelCheckpoint
+
+Saves model weights based on monitored metric:
+
+```python
+from lightning import callbacks
+
+checkpoint = callbacks.ModelCheckpoint(
+    dirpath="checkpoints/",
+    filename="{epoch}-{val_loss:.2f}",
+    monitor="val_loss",
+    mode="min",           # "min" or "max"
+    save_top_k=3,         # Keep best 3 models
+    save_last=True,       # Always save "last.ckpt"
+    auto_insert_metric_name=False,
+    every_n_epochs=1,     # Save every N epochs
+    train_time_interval="1ep"  # Or "1step", "epoch"
+)
+```
+
+| Parameter | Description |
+| :--- | :--- |
+| `monitor` | Metric to monitor |
+| `mode` | `"min"` for loss (lower is better), `"max"` for accuracy |
+| `save_top_k` | Number of best models to keep |
+| `save_last` | Always save most recent model |
+
+### EarlyStopping
+
+Stops training when metric stops improving:
+
+```python
+early_stop = callbacks.EarlyStopping(
+    monitor="val_loss",
+    mode="min",
+    patience=5,           # Stop after 5 epochs without improvement
+    min_delta=0.001,     # Minimum change to count as improvement
+    verbose=True,
+    stopping_threshold=0.1,  # Stop immediately if below this
+    check_on_train_epoch_end=False,  # Check at epoch end (vs batch)
+)
+```
+
+### LearningRateMonitor
+
+Logs learning rate to all loggers:
+
+```python
+lr_monitor = callbacks.LearningRateMonitor(
+    logging="interval",  # "interval" or "epoch"
+    interval="step",    # Update every "step" or "epoch"
+    log_momentum=True,  # Log momentum if using scheduler
+)
+```
+
+### ProgressBar
+
+Controls the progress bar:
+
+```python
+progress_bar = callbacks.ProgressBar(
+    refresh_rate=1,     # Update every N batches (0 = disable)
+    process_position=0, # Position in multi-GPU
+)
+```
+
+### ModelSummary
+
+Adds model summary to logger:
+
+```python
+model_summary = callbacks.ModelSummary(
+    max_depth=2         # Depth of summary
+)
+```
+
+## Execution Order
+
+Callbacks execute in the order they are passed to the Trainer:
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        LearningRateMonitor(),     # 1st
+        ModelCheckpoint(...),    # 2nd
+        EarlyStopping(...),       # 3rd
+    ]
+)
+```
+
+Within a single hook type (e.g., `on_train_batch_start`), callbacks execute in this order.
+
+:::caution[Execution Order]
+The execution order in multi-GPU training depends on the strategy. With `"ddp"`, callbacks execute on the main process only.
+:::
+
+## Custom Callback Example
+
+```python
+import lightning as L
+
+class CustomMetricTracker(Callback):
+    def __init__(self):
+        self.best_loss = float("inf")
+    
+    def on_train_start(self, trainer, pl_module):
+        print("Training starting!")
+    
+    def on_validation_epoch_end(self, trainer, pl_module, logs):
+        val_loss = logs.get("val_loss")
+        
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            print(f"New best loss: {val_loss:.4f}")
+        
+        # Force-stop if loss explodes
+        if val_loss > self.best_loss * 10:
+            print("Loss exploded! Stopping.")
+            trainer.should_stop = True
+    
+    def on_train_end(self, trainer, pl_module):
+        print(f"Training complete. Best loss: {self.best_loss:.4f}")
+```
+
+## Using Multiple Callbacks
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        callbacks.ModelCheckpoint(
+            monitor="val_loss",
+            save_top_k=3,
+            every_n_epochs=2
+        ),
+        callbacks.EarlyStopping(
+            monitor="val_loss",
+            patience=10,
+        ),
+        callbacks.LearningRateMonitor(
+            interval="epoch"
+        ),
+        MyCustomCallback(),
+    ]
+)
+```
+
+## Comparison
+
+| Aspect | Raw PyTorch | Lightning |
+| :--- | :--- | :--- |
+| Checkpointing | Manual save/load | `ModelCheckpoint` |
+| Early Stopping | Manual check + break | `EarlyStopping` |
+| LR Monitoring | Manual logging | `LearningRateMonitor` |
+| Custom Logic | Modify loop | Add callback |
+| Reusability | Copy-paste | Import and use |
+
+:::tip[Compose Callbacks]
+Build a library of custom callbacks for your team's common patterns (e.g., gradient monitoring, outlier detection, custom metric tracking).
+:::

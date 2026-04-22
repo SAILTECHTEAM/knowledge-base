@@ -1,0 +1,239 @@
+---
+sidebar_position: 1
+title: Project Structure
+description: Directory layout, entry points, and organization of a Lightning + Hydra project.
+---
+
+# Project Structure
+
+A well-organized project structure is essential for reproducible machine learning experiments. This document outlines the recommended directory layout based on the [Lightning-Hydra Template](https://github.com/ashleve/lightning-hydra-template), the canonical scaffold for PyTorch Lightning + Hydra projects.
+
+:::note[Template Reference]
+This documentation uses the [Lightning-Hydra Template](https://github.com/ashleve/lightning-hydra-template) as the canonical reference. The structure shown reflects established best practices for ML experimentation with Lightning and Hydra.
+:::
+
+## Directory Layout
+
+```text
+project/
+├── .github/                  # GitHub Actions workflows for CI/CD
+├── configs/                 # Hydra configuration files
+│   ├── callbacks/          # Callback configurations
+│   ├── datamodule/         # DataModule configurations
+│   ├── debug/             # Debug-specific configurations
+│   ├── experiment/        # Experiment configurations
+│   ├── logger/           # Logger configurations
+│   ├── model/             # Model configurations
+│   ├── module/           # LightningModule configurations
+│   ├── optimizer/         # Optimizer configurations
+│   ├── scheduler/        # Scheduler configurations
+│   ├── trainer/          # Trainer configurations
+│   ├── default.yaml      # Default configuration
+│   └── hydra/            # Hydra internal settings
+├── data/                   # Data files
+├── logs/                   # Log outputs (tensorboard, wandb, etc.)
+├── models/                 # Saved model checkpoints
+├── scripts/                # Standalone training/eval scripts
+│   ├── eval.py            # Evaluation script
+│   ├── export.py          # Model export script
+│   └── train.py           # Main training script
+├── src/                    # Source code
+│   ├── data/              # Data loading modules
+│   ├── models/            # Model definitions
+│   ├── utils/             # Utility functions
+│   └── __init__.py
+├── tests/                  # Unit tests
+├── README.md
+├── requirements.txt
+└── setup.py
+```
+
+## Purpose of Each Directory
+
+### `configs/`
+
+The `configs/` directory contains all Hydra configuration files. This is where experiment parameters are defined:
+
+| Subdirectory | Purpose |
+| :--- | :--- |
+| `callbacks/` | Custom callback configurations |
+| `datamodule/` | DataModule class and dataset settings |
+| `model/` | Model architecture parameters |
+| `module/` | LightningModule class and training logic |
+| `optimizer/` | Optimizer settings |
+| `scheduler/` | Learning rate scheduler settings |
+| `trainer/` | Trainer flags (devices, accelerator, etc.) |
+| `logger/` | Logging backend configurations |
+| `experiment/` | Complete experiment configurations |
+| `debug/` | Debug-specific overrides |
+
+### `src/`
+
+The `src/` directory contains the core Python modules:
+
+| Subdirectory | Purpose |
+| :--- | :--- |
+| `data/` | Data loading and processing logic |
+| `models/` | Model architectures |
+| `utils/` | Helper utilities (instantiation, logging setup) |
+
+### `scripts/`
+
+The `scripts/` directory contains entry point scripts:
+
+| Script | Purpose |
+| :--- | :--- |
+| `train.py` | Main training entry point |
+| `eval.py` | Evaluation on saved checkpoints |
+| `export.py` | Export model for inference |
+
+## Entry Points
+
+### train.py
+
+The primary training script uses the `@hydra.main` decorator to enable configuration management:
+
+```python
+# scripts/train.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # Instantiate components from config
+    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.datamodule)
+    model: LightningModule = hydra.utils.instantiate(cfg.module)
+    
+    # Configure callbacks and loggers
+    callbacks = instantiate_callbacks(cfg.get("callbacks", {}))
+    loggers = instantiate_loggers(cfg.get("logger", {}))
+    
+    # Create trainer
+    trainer = Trainer(
+        **cfg.trainer,
+        callbacks=callbacks,
+        logger=loggers,
+    )
+    
+    # Train
+    trainer.fit(model, datamodule=datamodule)
+
+if __name__ == "__main__":
+    main()
+```
+
+Running training:
+
+```bash
+python src/train.py
+# Or with overrides
+python src/train.py model.lr=1e-4 trainer.max_epochs=100
+```
+
+### eval.py
+
+Evaluation script loads a checkpoint and runs inference:
+
+```python
+# scripts/eval.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # Load checkpoint
+    model = LitModel.load_from_checkpoint(cfg.ckpt_path)
+    
+    # Run evaluation
+    trainer = Trainer(accelerator="cpu")
+    trainer.test(model)
+```
+
+### export.py
+
+Export script converts a checkpoint to a deployment format:
+
+```python
+# scripts/export.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    model = LitModel.load_from_checkpoint(cfg.ckpt_path)
+    
+    # Export to ONNX/TorchScript
+    model.to_onnx(cfg.export_path)
+```
+
+## Why This Structure Matters
+
+### Reproducibility
+
+Every experiment configuration is stored as YAML files. A complete experiment can be reproduced by:
+
+1. Checking out the code at a specific commit
+2. Using the same configuration file
+3. Running the same command
+
+### Configuration Composition
+
+The structure enables composition through Hydra's defaults list:
+
+```yaml
+# configs/experiment/my_experiment.yaml
+defaults:
+  - model: my_model
+  - datamodule: my_data
+  - optimizer: adam
+  - scheduler: cosine
+  - trainer: gpu
+```
+
+### Team Collaboration
+
+The consistent structure means any team member can navigate an unfamiliar project immediately. There is no ambiguity about where to find configuration, model code, or data loading logic.
+
+### Experiment Tracking
+
+Separating configuration from code allows logging frameworks to track what changed between experiments. The configuration file itself becomes a record of experiment parameters.
+
+## Default Configuration
+
+The default config ties everything together:
+
+```yaml
+# configs/default.yaml
+defaults:
+  - trainer: default
+  - model: default
+  - datamodule: default
+  - optimizer: adam
+  - scheduler: cosine
+  - callbacks: default
+  - logger: tensorboard
+
+# Override specific parameters
+trainer:
+  max_epochs: 10
+
+model:
+  lr: 1e-3
+```
+
+## Running with Custom Configurations
+
+```bash
+# Use default config
+python src/train.py
+
+# Override from command line
+python src/train.py trainer.max_epochs=100 model.lr=1e-4
+
+# Use specific experiment config
+python src/train.py +experiment=my_experiment
+
+# Debug mode (fast dev run)
+python src/train.py +debug=default
+```
+
+:::tip[Directory Organization]
+Keep each configuration file focused on a single concern. Modular configs (model, optimizer, datamodule) can be composed together, while experiment configs combine these modular pieces.
+:::
+
+## Next Steps
+
+- [Hydra Basics](./02-hydra-basics.mdx): Learn the Hydra fundamentals
+- [Config Composition](./03-config-composition.mdx): Compose complex experiments
+- [Instantiation](./04-instantiation.mdx): Instantiate components from config

@@ -1,0 +1,401 @@
+---
+sidebar_position: 2
+title: Hydra Basics
+description: Config groups, defaults list, _target_ conventions, and @hydra.main decorator.
+---
+
+# Hydra Basics
+
+Hydra is a framework for elegantly configuring complex applications. It enables configuration composition, command-line overrides, and dynamic instantiation. This document covers the core Hydra concepts needed for Lightning integration.
+
+## Core Concepts
+
+Hydra addresses a fundamental problem: complex applications have many parameters that interact in non-trivial ways. Hardcoding these values makes the code inflexible; passing them all as command-line arguments becomes unwieldy.
+
+Hydra solves this by:
+
+1. **Configuration files**: Define parameters in YAML files
+2. **Composition**: Combine configs from multiple sources
+3. **Overrides**: Override values from command line
+4. **Instantiation**: Create objects from config dictionaries
+
+## The Defaults List
+
+The defaults list is the heart of Hydra configuration. It specifies which config files to load and in what order:
+
+```yaml
+# configs/default.yaml
+defaults:
+  - trainer: default
+  - model: default
+  - datamodule: default
+  - optimizer: adam
+  - scheduler: cosine
+  - _self_  # Allows local overrides
+```
+
+Each default entry maps to a config file. The `_self_` keyword allows local config values to override composed values.
+
+### Loading Order
+
+Configs are loaded in the order they appear in defaults:
+
+1. First item loads first (base config)
+2. Later items override earlier values
+3. `_self_` allows local file to override all
+
+```yaml
+# configs/trainer/default.yaml
+# This file is loaded first for trainer section
+defaults:
+  - base: gpu
+
+# configs/trainer/base.yaml
+# Base trainer settings
+accelerator: gpu
+devices: 1
+precision: 32
+
+# After loading defaults, effective trainer config:
+# {accelerator: gpu, devices: 1, precision: 32}
+```
+
+## Config Groups
+
+Configs are organized into groups (subdirectories within `configs/`):
+
+```text
+configs/
+├── trainer/
+│   ├── default.yaml
+│   ├── gpu.yaml
+│   └── cpu.yaml
+├── model/
+│   ├── default.yaml
+│   ├── resnet.yaml
+│   └── transformer.yaml
+└── optimizer/
+    ├── adam.yaml
+    └── sgd.yaml
+```
+
+### Accessing Config Groups
+
+Reference config groups using dot notation:
+
+```bash
+# Load configs/trainer/gpu.yaml
+python src/train.py trainer=gpu
+
+# Override optimizer from command line
+python src/train.py optimizer=sgd
+```
+
+The config group name corresponds to the subdirectory and file name without extension.
+
+## Command-Line Overrides
+
+Any config value can be overridden from the command line:
+
+```bash
+# Override single value
+python src/train.py model.lr=1e-4
+
+# Override nested value
+python src/train.py trainer.max_epochs=100
+
+# Override list
+python src/train.py model.layers=[64,128,256]
+
+# Override multiple values
+python src/train.py model.lr=1e-4 trainer.max_epochs=50
+```
+
+### Override Syntax
+
+| Syntax | Description |
+| :--- | :--- |
+| `key=value` | Set value |
+| `+key=value` | Add new key |
+| `~key` | Delete key |
+| `key+=value` | Append to list |
+| `key@group` | Use alternative config |
+
+## The `_target_` Convention
+
+The `_target_` key tells Hydra how to instantiate an object. It specifies the full class path:
+
+```yaml
+# configs/datamodule/mnist.yaml
+_target_: src.data.MNISTDataModule
+data_dir: ./data
+batch_size: 32
+```
+
+Hydra parses `_target_` to determine which class to instantiate, then passes remaining keys as arguments:
+
+```python
+from hydra.utils import instantiate
+
+# This creates an instance of src.data.MNISTDataModule(data_dir="./data", batch_size=32)
+datamodule = instantiate(cfg.datamodule)
+```
+
+### Example: DataModule Config
+
+```yaml
+# configs/datamodule/mnist.yaml
+_target_: src.data.MNISTDataModule
+data_dir: ${data_dir}  # Variable interpolation
+batch_size: 64
+num_workers: 4
+```
+
+```python
+# src/data/mnist.py
+class MNISTDataModule(LightningDataModule):
+    def __init__(self, data_dir: str, batch_size: int, num_workers: int = 0):
+        super().__init__()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+```
+
+## The `_partial_` Convention
+
+Use `_partial_` when you need to defer instantiation, such as for factories:
+
+```yaml
+# For optimizers that take model as argument
+optimizer:
+  _partial_: torch.optim.Adam
+  lr: 1e-3
+```
+
+```python
+from hydra.utils import instantiate
+
+# Creates a partial (callable that returns Adam when called with model.parameters())
+optimizer_fn = instantiate(cfg.optimizer)
+
+# Later: instantiate the actual optimizer
+optimizer = optimizer_fn(model.parameters())
+```
+
+## The @hydra.main Decorator
+
+The `@hydra.main` decorator injects configuration into a function:
+
+```python
+# scripts/train.py
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # cfg contains the composed configuration
+    print(OmegaConf.to_yaml(cfg))
+    
+    # Access configuration values
+    lr = cfg.model.lr
+    epochs = cfg.trainer.max_epochs
+    
+    # Instantiate components
+    model = hydra.utils.instantiate(cfg.model)
+```
+
+| Parameter | Description |
+| :--- | :--- |
+| `config_path` | Path to configs directory (relative to script) |
+| `config_name` | Name of default config file (without .yaml) |
+| `version_base` | Hydra version (use `None` for Hydra 1.3+) |
+
+### Complete train.py Example
+
+```python
+# scripts/train.py
+import hydra
+from omegaconf import DictConfig
+import lightning as L
+from hydra.utils import instantiate
+
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # Instantiate DataModule
+    datamodule = instantiate(cfg.datamodule)
+    
+    # Instantiate Model
+    model = instantiate(cfg.model)
+    
+    # Create Trainer
+    trainer = L.Trainer(**cfg.trainer)
+    
+    # Train
+    trainer.fit(model, datamodule=datamodule)
+
+if __name__ == "__main__":
+    main()
+```
+
+## Variable Interpolation
+
+Hydra supports variable interpolation within configs:
+
+```yaml
+# configs/default.yaml
+data_dir: ./data
+model_dir: ./models
+
+# Variable interpolation
+datamodule:
+  _target_: src.data.MNISTDataModule
+  data_dir: ${data_dir}  # Uses data_dir value
+
+model:
+  save_dir: ${model_dir}
+```
+
+Interpolations are resolved at runtime. You can also interpolate across config groups:
+
+```yaml
+# Interpolate from another group
+model:
+  _target_: src.models.MyModel
+  save_dir: ${trainer.defaults.model_dir}
+```
+
+## OmegaConf
+
+Hydra uses [OmegaConf](https://omegaconf.readthedocs.io/) for configuration management. It provides:
+
+```python
+from omegaconf import OmegaConf, DictConfig
+
+@hydra.main(...)
+def main(cfg: DictConfig):
+    # Convert to dictionary
+    cfg_dict = OmegaConf.to_container(cfg)
+    
+    # Override programmatically
+    OmegaConf.set_struct(cfg, False)
+    cfg.new_key = "value"
+    
+    # Check if key exists
+    if "model" in cfg:
+        ...
+```
+
+:::tip[OmegaConf Features]
+OmegaConf supports structured configs (with type hints), environment variable interpolation, and validation. Use `OmegaConf.structured()` for configs that need validation.
+:::
+
+## Hydrai as a Lighter Alternative
+
+For simpler projects that do not require advanced composition, Lightning provides `LightningCLI` — a built-in alternative to manual Hydra setup:
+
+```python
+from lightning import cli
+
+# This provides CLI argument parsing automatically
+# python train.py --model.lr=1e-4 --trainer.max_epochs=10
+cli.LightningCLI(model_class=MyModel, datamodule_class=MyDataModule)
+```
+
+### LightningCLI vs. Manual Hydra
+
+| Feature | LightningCLI | Manual Hydra |
+| :--- | :--- | :--- |
+| **Complexity** | Low | High |
+| **Composition** | Basic | Full |
+| **Flexibility** | Limited | Unlimited |
+| **Use Case** | Simple projects | Research/Production |
+
+```python
+# LightningCLI provides these automatically:
+# - Argument parsing
+# - Optimizer/scheduler configuration
+# - Checkpoint loading
+# - Multi-GPU training flags
+```
+
+:::note[LightningCLI]
+LightningCLI is excellent for rapid prototyping and simple projects. For complex experiments with many configuration combinations, manual Hydra setup provides more control.
+:::
+
+## Complete Example: Config Files
+
+### trainer/default.yaml
+
+```yaml
+# configs/trainer/default.yaml
+accelerator: gpu
+devices: 1
+max_epochs: 10
+precision: 32
+accumulate_grad_batches: 1
+gradient_clip_val: 0.0
+```
+
+### model/default.yaml
+
+```yaml
+# configs/model/default.yaml
+_target_: src.models.MyModel
+lr: 1e-3
+hidden_dims: [256, 128]
+dropout: 0.1
+```
+
+### optimizer/adam.yaml
+
+```yaml
+# configs/optimizer/adam.yaml
+_target_: torch.optim.Adam
+lr: 1e-3
+betas: [0.9, 0.999]
+eps: 1e-8
+weight_decay: 0.0
+```
+
+### default.yaml (Composed)
+
+```yaml
+# configs/default.yaml
+defaults:
+  - trainer: default
+  - model: default
+  - optimizer: adam
+
+trainer:
+  max_epochs: 10
+
+# This section overrides config from defaults
+model:
+  lr: 1e-4  # Overrides optimizer's default lr
+```
+
+## Running Commands
+
+```bash
+# Default run
+python src/train.py
+
+# Override learning rate
+python src/train.py model.lr=5e-5
+
+# Use SGD optimizer
+python src/train.py optimizer=sgd
+
+# Debug mode
+python src/train.py +debug=default
+```
+
+:::tip[Testing Configs]
+Use `python src/train.py --cfg job` to see the full composed configuration without running training. This is invaluable for debugging configuration issues.
+:::
+
+## Next Steps
+
+- [Config Composition](./03-config-composition.mdx): Advanced composition patterns
+- [Instantiation](./04-instantiation.mdx): Instantiating Lightning components
+- [Project Structure](./01-project-structure.mdx): Overall directory layout

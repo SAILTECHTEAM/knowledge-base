@@ -1,0 +1,562 @@
+---
+sidebar_position: 2
+title: Anti-Patterns
+description: Common anti-patterns in PyTorch Lightning that lead to bugs, performance issues, and maintenance problems.
+---
+
+# Anti-Patterns
+
+This guide documents common anti-patterns in PyTorch Lightning that should be avoided. These patterns often arise from attempting to replicate native PyTorch behavior directly in Lightning.
+
+## Anti-Pattern 1: Calling `.backward()` in `training_step`
+
+One of the most common mistakes is explicitly calling `.backward()` or `optimizer.step()` inside the training step.
+
+### Incorrect
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        pred = self(x)
+        loss = nn.functional.cross_entropy(pred, y)
+
+        # ❌ Wrong: Manual backward pass
+        loss.backward()
+
+        # ❌ Wrong: Manual optimizer step
+        self.optimizers().step()
+
+        return loss
+```
+
+### Correct
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        pred = self(x)
+        loss = nn.functional.cross_entropy(pred, y)
+
+        # ✅ Correct: Return loss, let Trainer handle backward + step
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
+```
+
+### When Manual Optimization is Acceptable
+
+Only use manual optimization for research-specific gradient manipulation:
+
+```python
+class GradientAccumulationModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.accumulate_every_n = 4
+
+    def training_step(self, batch, batch_idx):
+        # Custom loss computation
+        loss = self.compute_loss(batch)
+
+        # Manual gradient accumulation
+        if batch_idx % self.accumulate_every_n == 0:
+            self.manual_backward(loss / self.accumulate_every_n)
+        else:
+            self.manual_backward(loss / self.accumulate_every_n, retain_graph=True)
+
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_idx):
+        # Custom step logic
+        if batch_idx % self.accumulate_every_n == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+```
+
+:::caution[Manual Optimization]
+Only use manual optimization when implementing custom gradient behavior. Standard training should never require it.
+:::
+
+---
+
+## Anti-Pattern 2: Managing Devices Inside LightningModule
+
+Lightning handles device placement automatically. Never manually move tensors to devices.
+
+### Incorrect
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+
+        # ❌ Wrong: Manual device management
+        x = x.to(self.device)
+        y = y.to(self.device)
+
+        pred = self(x)
+        return pred
+```
+
+### Correct
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        # ✅ Correct: Trainer handles device placement automatically
+        pred = self(x)
+        return pred
+
+    def forward(self, x):
+        # Inputs are already on the correct device
+        return self.layers(x)
+```
+
+### Incorrect: Custom Device Placement in DataModule
+
+```python
+# ❌ Wrong: Manual device placement in dataset
+class MyDataset(Dataset):
+    def __getitem__(self, idx):
+        x = torch.load(f"data/{idx}.pt")
+        # Don't manually move to device here
+        return x.to("cuda")  # Never do this
+```
+
+### Correct: Let Trainer Handle Devices
+
+```python
+# ✅ Correct: Keep tensors on CPU in dataset
+class MyDataset(Dataset):
+    def __getitem__(self, idx):
+        x = torch.load(f"data/{idx}.pt")
+        return x  # Stay on CPU
+
+# Trainer handles device placement
+trainer = L.Trainer(accelerator="cuda", devices=1)
+# All data is automatically moved to CUDA
+```
+
+:::info[Device Management]
+Lightning automatically moves:
+- Model parameters to the selected device
+- Batches from DataLoader to the device
+- Metrics and losses to the device
+Never manually call `.to(device)` inside LightningModule hooks.
+:::
+
+---
+
+## Anti-Pattern 3: Hardcoding Paths and Hyperparameters
+
+Never hardcode file paths, learning rates, or other hyperparameters in code.
+
+### Incorrect
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ❌ Wrong: Hardcoded values
+        self.lr = 1e-3
+        self.data_dir = "/path/to/data"
+```
+
+```python
+# ❌ Wrong: Hardcoded in training script
+trainer = L.Trainer(
+    max_epochs=100,
+    gpus=1,
+)
+```
+
+### Correct: Use Hydra Configuration
+
+```yaml
+# config/train.yaml
+model:
+  learning_rate: 1e-3
+  hidden_size: 256
+
+data:
+  data_dir: ./data
+  batch_size: 32
+
+trainer:
+  max_epochs: 100
+  accelerator: auto
+  devices: auto
+```
+
+```python
+# ✅ Correct: Pass config to components
+@hydra.main(version_base=None, config_path="config", config_name="train")
+def main(cfg: DictConfig):
+    model = MyModel(**cfg.model)
+    dm = MyDataModule(**cfg.data)
+    trainer = L.Trainer(**cfg.trainer)
+```
+
+### Environment Variables for Paths
+
+```python
+# ✅ Correct: Use environment variables for sensitive paths
+import os
+
+data_dir = os.environ.get("DATA_DIR", "./data")
+checkpoint_dir = os.environ.get("CHECKPOINT_DIR", "./checkpoints")
+```
+
+---
+
+## Anti-Pattern 4: Bypassing the Trainer
+
+Avoid raw PyTorch training loops when using Lightning. The Trainer handles many edge cases.
+
+### Incorrect: Hybrid Approach
+
+```python
+# ❌ Wrong: Mixing Lightning and raw PyTorch
+trainer = L.Trainer()
+
+for epoch in range(num_epochs):
+    # Manual epoch loop
+    for batch in dataloader:
+        # Manual training
+        outputs = model(batch)
+        loss = criterion(outputs, batch[1])
+        loss.backward()
+        optimizer.step()
+
+    # Using Lightning validation
+    trainer.validate(model, dataloader)
+```
+
+### Correct: Full Lightning Approach
+
+```python
+# ✅ Correct: Let Trainer handle everything
+trainer = L.Trainer(max_epochs=10)
+trainer.fit(model, dataloader)  # Training + validation
+```
+
+### When Raw PyTorch is Appropriate
+
+Use raw PyTorch only for:
+
+- Inference without a Trainer
+- Custom distributed training logic
+- Debugging Lightning internals
+
+```python
+# Appropriate raw PyTorch usage: inference
+model = MyModel.load_from_checkpoint("best.ckpt")
+model.eval()
+
+with torch.no_grad():
+    predictions = model(test_input)
+```
+
+---
+
+## Anti-Pattern 5: Mixed Configuration Strategies
+
+Don't mix Hydra with argparse or other configuration methods.
+
+### Incorrect
+
+```python
+# ❌ Wrong: Mixing Hydra with argparse
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--lr", type=float)
+args = parser.parse_args()
+
+
+@hydra.main(config_path="config", config_name="train")
+def main(cfg):
+    # Conflict: cfg has learning_rate, args has lr
+    model = MyModel(learning_rate=cfg.model.lr)  # Hydra wins
+```
+
+### Correct: Single Configuration Source
+
+```python
+# ✅ Correct: Use Hydra exclusively
+@hydra.main(config_path="config", config_name="train")
+def main(cfg: DictConfig):
+    model = MyModel(**cfg.model)
+    trainer = L.Trainer(**cfg.trainer)
+```
+
+### Command Line + Hydra
+
+```bash
+# Override from command line
+python train.py model.learning_rate=3e-4 data.batch_size=64
+```
+
+---
+
+## Anti-Pattern 6: Ignoring `self.log` Synchronization in DDP
+
+In distributed training, incorrect logging synchronization leads to wrong metrics.
+
+### Incorrect
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ❌ Wrong: No synchronization in DDP
+    self.log("train_loss", loss)
+
+    return loss
+```
+
+### Correct
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ✅ Correct: Proper synchronization
+    self.log(
+        "train_loss",
+        loss,
+        on_step=True,       # Log every step (in DDP: per batch per rank)
+        on_epoch=True,     # Aggregate at epoch end
+        sync_dist=True,     # Synchronize across all GPUs
+        reduce_fx="mean",  # How to reduce across GPUs
+    )
+
+    return loss
+```
+
+### Understanding Sync Behavior
+
+| `sync_dist` | `on_epoch` | Behavior |
+|-------------|-------------|----------|
+| `False` | `False` | Log step value on current rank only |
+| `True` | `False` | Log step value, synchronized across ranks |
+| `False` | `True` | Aggregate at epoch end from current rank |
+| `True` | `True` | Aggregate at epoch end from all ranks |
+
+```python
+# ✅ Recommended: Explicit logging
+def validation_step(self, batch, batch_idx):
+    pred = self(batch[0])
+    loss = nn.functional.cross_entropy(pred, batch[1])
+
+    self.log(
+        "val_loss",
+        loss,
+        on_step=False,      # Don't log every step
+        on_epoch=True,     # Aggregate at epoch end
+        sync_dist=True,    # Sync across all GPUs
+        prog_bar=True,     # Show in progress bar
+    )
+```
+
+:::caution[DDP Logging Mistakes]
+Common issues in distributed training:
+- `sync_dist=False` results in incorrect metrics (single GPU value only)
+- Not using `reduce_fx` leads to unexpected aggregation
+- Logging at both step and epoch without clear intent
+:::
+
+---
+
+## Anti-Pattern 7: Using Deprecated APIs
+
+Lightning 2.0 deprecated several older APIs. Update code accordingly.
+
+### Deprecated: `weights_summary`
+
+```python
+# ❌ Deprecated in Lightning 2.0
+trainer = L.Trainer(weights_summary="full")
+```
+
+```python
+# ✅ Use model.summarize() instead
+trainer = L.Trainer()
+model.summarize()
+```
+
+### Deprecated: `rnn_utils` Import
+
+```python
+# ❌ Deprecated import
+from pytorch_lightning.core import rnn_utils
+
+# ✅ Use torch.nn.utils.rnn instead
+from torch.nn.utils.rnn import pack_padded_sequence
+```
+
+### Deprecated: `enable_validation`
+
+```python
+# ❌ Deprecated
+trainer = L.Trainer(enable_validation=True)  # Default is True
+
+# ✅ Just don't pass it
+trainer = L.Trainer()  # Validation enabled by default
+```
+
+### Deprecated: `auto_select_gpus`
+
+```python
+# ❌ Deprecated in Lightning 2.0
+trainer = L.Trainer(auto_select_gpus=True)
+
+# ✅ Use devices + accelerator
+trainer = L.Trainer(accelerator="auto", devices="auto")
+```
+
+---
+
+## Anti-Pattern 8: Large Batch Sizes Without Gradients
+
+Accumulating gradients incorrectly leads to different effective learning rates.
+
+### Incorrect
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ❌ Wrong: Dividing loss but not normalizing gradients
+    loss = loss / 4
+    loss.backward()  # Gradients are 1/4 of expected
+
+    # Manually stepping every 4 batches
+    if batch_idx % 4 == 0:
+        self.optimizers().step()
+        self.optimizers().zero_grad()
+```
+
+### Correct: Lightning Built-in Gradient Accumulation
+
+```python
+# ✅ Let Lightning handle accumulation
+trainer = L.Trainer(
+    accumulate_grad_batches=4,  # Automatically accumulates
+)
+```
+
+### Correct: Manual with Proper Normalization
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ✅ Correct: Normalize loss before backward
+    self.manual_backward(loss / 4)  # Normalize so total is correct
+
+    # Step every 4 batches
+    if (batch_idx + 1) % 4 == 0:
+        self.optimizers().step()
+        self.optimizers().zero_grad()
+```
+
+---
+
+## Anti-Pattern 9: Not Using `train_dataloader` Return Type
+
+Returning the wrong type causes subtle bugs.
+
+### Incorrect
+
+```python
+def train_dataloader(self):
+    # ❌ Wrong: Returns list instead of DataLoader
+    return [batch for batch in dataset]
+```
+
+### Correct
+
+```python
+def train_dataloader(self):
+    # ✅ Must return DataLoader (or iterable)
+    return DataLoader(dataset, batch_size=32)
+```
+
+---
+
+## Anti-Pattern 10: State Dict Issues
+
+Improper state management breaks checkpointing.
+
+### Incorrect
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ❌ Lists/dicts not saved automatically
+        self.buffers = [torch.zeros(10) for _ in range(5)]
+```
+
+### Correct
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ✅ Use nn.Parameter or registered buffers
+        self.buffers = nn.ParameterList([
+            nn.Parameter(torch.zeros(10)) for _ in range(5)
+        ])
+```
+
+### Alternative: Manual State Dict
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.custom_state = {"key": torch.zeros(10)}
+
+    def state_dict(self):
+        # ✅ Override to include custom state
+        state = super().state_dict()
+        state.update(self.custom_state)
+        return state
+
+    def load_state_dict(self, state_dict):
+        # ✅ Override to load custom state
+        self.custom_state = state_dict.pop("custom_state")
+        super().load_state_dict(state_dict)
+```
+
+---
+
+## Quick Reference: Anti-Patterns Summary
+
+| Anti-Pattern | Incorrect | Correct |
+|-------------|-----------|---------|
+| Backward call | `loss.backward()` in training_step | Return loss |
+| Device management | `x.to(device)` manually | Let Trainer handle |
+| Configuration | Hardcoded values | Hydra config |
+| Training loop | Manual loop + Trainer | Full Trainer |
+| Config mixing | Hydra + argparse | Hydra only |
+| DDP logging | `sync_dist=False` | `sync_dist=True` |
+| Gradient accumulation | Without normalization | Normalize loss |
+
+---
+
+## Next Steps
+
+- [Template Repository](https://github.com/SAILTECHTEAM/pytorch-lightning-hydra-template) — Clean implementation examples
+- [Migration Guide](../05-migration/01-native-to-lightning.mdx) — Step-by-step migration

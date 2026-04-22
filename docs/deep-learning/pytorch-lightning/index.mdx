@@ -1,0 +1,39 @@
+---
+title: PyTorch Lightning Tutorial
+description: Comprehensive guide to PyTorch Lightning for scalable deep learning research and production.
+---
+
+# PyTorch Lightning Tutorial
+
+PyTorch Lightning is a lightweight PyTorch wrapper that abstracts away engineering boilerplate while keeping full control over research logic. It standardizes the training loop, enables distributed training with a single configuration change, and integrates seamlessly with modern MLOps tools.
+
+This section covers the Lightning philosophy, mental model, and core components. By the end, you will understand how Lightning organizes your PyTorch code and be ready to build, train, and scale models with minimal boilerplate.
+
+## What This Section Covers
+
+| Chapter | Topic |
+| :--- | :--- |
+| Introduction | Philosophy, mental model, and hook system |
+| Core Components | LightningModule, DataModule, Trainer, Callbacks, Logging |
+| Hydra Integration | Configuration management with Hydra |
+| Custom Implementation | Extending and customizing Lightning |
+| Best Practices | Production-ready patterns and debugging |
+| Migration | Converting existing PyTorch code to Lightning |
+
+## Prerequisites
+
+This tutorial assumes familiarity with native PyTorch:
+
+- Tensors, devices, and autograd
+- `torch.nn.Module` and model construction
+- `Dataset`, `DataLoader`, and data pipelines
+- Optimizers, learning rate schedulers, and loss functions
+- Basic training loop implementation
+
+If you need to refresh these fundamentals, start with the [PyTorch Tutorial](../pytorch-tutorial/) first.
+
+## Navigation Guide
+
+1. **New to Lightning**: Start with [Philosophy](./01-introduction/01-philosophy.mdx) to understand why Lightning exists, then [Mental Model](./01-introduction/02-mental-model.mdx) to understand how it organizes code.
+2. **Building First Model**: Move to [LightningModule](./02-core-components/01-lightning-module.mdx) and [DataModule](./02-core-components/02-datamodule.mdx) to build your first training pipeline.
+3. **Customizing Training**: Explore [Trainer](./02-core-components/03-trainer.mdx), [Callbacks](./02-core-components/04-callbacks.mdx), and [Logging](./02-core-components/05-logging-metrics.mdx) for advanced customization.

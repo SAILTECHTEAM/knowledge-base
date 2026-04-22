@@ -1,0 +1,190 @@
+---
+sidebar_position: 2
+title: Mental Model
+description: Understanding how Lightning organizes PyTorch code and the hook system.
+---
+
+# Mental Model
+
+## How Lightning Organizes Your Code
+
+Lightning separates a PyTorch project into four clear responsibilities:
+
+| Component | Responsibility |
+| :--- | :--- |
+| **Model** | Forward pass, loss computation, architecture |
+| **Data** | Dataset, transforms, data loading |
+| **Trainer** | Loop execution, device management, callbacks |
+| **Config** | Hyperparameters, paths, settings |
+
+This separation means each component is testable, reusable, and independent.
+
+## The Hook System
+
+Lightning replaces the explicit training loop with a **hook system**. You implement specific methods (`hooks`) that Lightning calls at defined points in training.
+
+### Core Hooks
+
+```mermaid
+flowchart TD
+    A[Start Training] --> B[on_fit_start]
+    B --> C[setup for train/val]
+    C --> D[Epoch Loop]
+    D --> E[on_epoch_start]
+    E --> F[Batch Loop]
+    F --> G[training_step]
+    G --> H[training_step_end]
+    H --> I{More batches?}
+    I -- Yes --> F
+    I -- No --> J[training_epoch_end]
+    J --> K[on_validation_epoch_end]
+    K --> L[optimizer_step]
+    L --> M{More epochs?}
+    M -- Yes --> D
+    M -- No --> N[on_fit_end]
+```
+
+### Key Hooks Reference
+
+| Hook | Called | Purpose |
+| :--- | :--- | :--- |
+| `on_train_start` | Once before first training epoch | Initialize logging, build model |
+| `training_step` | Every training batch | Compute loss from one batch |
+| `validation_step` | Every validation batch | Compute validation metrics |
+| `training_epoch_end` | End of each training epoch | Aggregate epoch-level metrics |
+| `configure_optimizers` | Once before training | Configure optimizers and schedulers |
+| `on_train_end` | Once after training finishes | Cleanup, finalLogging |
+
+### Mapping: Raw PyTorch vs Lightning
+
+Here is how Lightning hooks map to a raw PyTorch training loop:
+
+```python
+# Raw PyTorch
+for epoch in range(num_epochs):
+    model.train()
+    for batch in train_loader:
+        optimizer.zero_grad()
+        output = model(batch.x)
+        loss = criterion(output, batch.y)
+        loss.backward()
+        optimizer.step()
+
+# Lightning equivalent hooks
+class MyModel(LightningModule):
+    def configure_optimizers(self):
+        return optimizer
+
+    def training_step(self, batch, batch_idx):
+        output = self(batch.x)
+        loss = criterion(output, batch.y)
+        return loss
+```
+
+| Raw PyTorch | Lightning Hook |
+| :--- | :--- |
+| `for epoch` loop | Managed by Trainer |
+| `for batch` loop | Managed by Trainer |
+| `optimizer.zero_grad()` | Automatic (set `optimizer.zero_grad()` if using manual optimization) |
+| `output = model(batch)` | `training_step(self, batch, batch_idx)` |
+| `loss = criterion(output, target)` | Inside `training_step` |
+| `loss.backward()` | Automatic |
+| `optimizer.step()` | Automatic via `configure_optimizers` |
+
+## Separation of Concerns
+
+### Model vs Data vs Trainer vs Config
+
+```mermaid
+flowchart LR
+    subgraph Model["Model (LightningModule)"]
+        M1[forward]
+        M2[training_step]
+        M3[configure_optimizers]
+    end
+    
+    subgraph Data["Data (LightningDataModule)"]
+        D1[setup]
+        D2[Train/Val/Test Loaders]
+    end
+    
+    subgraph Trainer["Trainer"]
+        T1[Epoch Loop]
+        T2[Device Mgmt]
+        T3[Callbacks]
+    end
+    
+    subgraph Config["Config (YAML/Code)"]
+        C1[Hyperparameters]
+        C2[Paths]
+        C3[Settings]
+    end
+    
+    Data -->|dataloader| Model
+    Model -->|loss/output| Trainer
+    Config -->|settings| Trainer
+```
+
+### LightningModule
+
+Contains:
+
+- Model architecture (`nn.Module` layers in `__init__`)
+- Forward pass (`forward()`)
+- Training logic (`training_step()`)
+- Validation logic (`validation_step()`)
+- Optimizer configuration (`configure_optimizers()`)
+- Logging (`self.log()`)
+
+Does NOT contain:
+
+- Data loading (handled by DataModule)
+- Epoch loops (handled by Trainer)
+- Device placement (handled by Trainer)
+
+### LightningDataModule
+
+Contains:
+
+- Dataset construction (`setup()`)
+- Data loaders (`train_dataloader()`, `val_dataloader()`, `test_dataloader()`)
+- Transforms and preprocessing
+- Data splits
+
+Does NOT contain:
+
+- Model architecture
+- Training logic
+- Optimizer configuration
+
+### Trainer
+
+Manages:
+
+- Epoch and batch iteration
+- Device placement (CPU/GPU/TPU)
+- Gradient zeroing, backpropagation, optimizer stepping
+- AMP (automatic mixed precision)
+- Checkpointing and early stopping
+- Logging integration
+
+:::tip[Clear Boundaries]
+Keep model code in the model, data code in the data module, and training configuration in config files. This makes each component independently testable.
+:::
+
+## Execution Flow
+
+When you call `trainer.fit(model, datamodule=datamodule)`:
+
+1. **Initialization**: Trainer sets up devices, mixed precision, distributed training
+2. **`on_fit_start`**: Model and DataModule are initialized
+3. **`setup()`**: DataModule prepares datasets
+4. **`configure_optimizers`**: Optimizers and schedulers are created
+5. **Epoch Loop**:
+   - `on_epoch_start`
+   - For each batch: `training_step`
+   - `training_epoch_end`
+   - `on_validation_epoch_end` (runs validation)
+6. **Cleanup**: `on_fit_end` runs, cleanup callbacks fire
+
+This structured flow is why Lightning is predictable — every training run follows the same sequence.

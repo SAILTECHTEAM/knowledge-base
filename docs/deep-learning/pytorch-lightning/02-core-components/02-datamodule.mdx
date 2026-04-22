@@ -1,0 +1,310 @@
+---
+sidebar_position: 2
+title: LightningDataModule
+description: Deep dive into the LightningDataModule class for standardized data handling.
+---
+
+# LightningDataModule
+
+`LightningDataModule` standardizes data loading across projects and teams. It encapsulates dataset creation, transforms, and data loaders in a single reusable component.
+
+## Why DataModule
+
+Without DataModule, project-specific data loading logic scatters across training scripts:
+
+```python
+# Common pattern: data logic in training script
+class MyTrainer:
+    def setup_data(self):
+        transform = transforms.Compose([...])
+        train_ds = CustomDataset(root="data/", split="train", transform=transform)
+        val_ds = CustomDataset(root="data/", split="val", transform=transform)
+        self.train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+        self.val_loader = DataLoader(val_ds, batch_size=32)
+```
+
+DataModule moves this into a dedicated, reusable class:
+
+```python
+class MyData(L.LightningModule):
+    def train_dataloader(self):
+        # Still here (for now)
+        pass
+```
+
+Wait — in Lightning 2.x, DataModule uses `setup()` and `_predict_dataloader()` methods instead:
+
+```python
+class MyData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str):
+        # Called by Trainer to initialize data
+        if stage == "fit":
+            # Load training data
+            pass
+        elif stage == "test":
+            # Load test data
+            pass
+```
+
+## Basic Structure
+
+```python
+import lightning as L
+import torch
+from torch.utils.data import DataLoader, random_split
+
+class MyData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.save_hyperparameters()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str = None):
+        # Load and split dataset
+        full_dataset = MyDataset(root=self.data_dir)
+        
+        train_size = int(0.8 * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        
+        self.train_dataset, self.val_dataset = random_split(
+            full_dataset, [train_size, val_size]
+        )
+    
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def test_dataloader(self):
+        return DataLoader(
+            self.val_dataset,  # Or separate test set
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4
+        )
+```
+
+## The setup Method
+
+The `setup(stage)` method is called by the Trainer to prepare data:
+
+| Stage | Called When | Typical Use |
+| :--- | :--- | :--- |
+| `"fit"` | `trainer.fit()` | Load train/val datasets |
+| `"test"` | `trainer.test()` | Load test dataset |
+| `"predict"` | `trainer.predict()` | Load prediction dataset |
+
+```python
+def setup(self, stage: str):
+    if stage == "fit":
+        # Training and validation data
+        self.train_ds = MyDataset(root=self.data_dir, split="train")
+        self.val_ds = MyDataset(root=self.data_dir, split="val")
+    
+    elif stage == "test":
+        # Test data
+        self.test_ds = MyDataset(root=self.data_dir, split="test")
+    
+    elif stage == "predict":
+        # Unlabeled data for prediction
+        self.predict_ds = MyDataset(root=self.data_dir, split="predict")
+```
+
+:::tip[Lazy Loading]
+Load data inside `setup()` rather than `__init__()` for efficiency. `setup()` is called on the device where training happens, so data is loaded where it is needed.
+:::
+
+## DataLoader Methods
+
+| Method | Stage | Description |
+| :--- | :--- | :--- |
+| `train_dataloader` | Fit/Validate | Returns training DataLoader |
+| `val_dataloader` | Fit/Validate | Returns validation DataLoader |
+| `test_dataloader` | Test | Returns test DataLoader |
+| `predict_dataloader` | Predict | Returns prediction DataLoader |
+
+```python
+def train_dataloader(self):
+    return DataLoader(
+        self.train_ds,
+        batch_size=self.batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        drop_last=True  # Useful for gradient stability
+    )
+```
+
+### Multiple DataLoaders
+
+Return a list to use multiple DataLoaders (e.g., for multi-modal learning):
+
+```python
+def train_dataloader(self):
+    return [
+        DataLoader(self.image_ds, batch_size=32, shuffle=True),
+        DataLoader(self.text_ds, batch_size=32, shuffle=True),
+    ]
+```
+
+In `training_step`, access multiple batches:
+
+```python
+def training_step(self, batch, batch_idx):
+    image_batch, text_batch = batch  # From two dataloaders
+    # ...
+```
+
+## Comparison with Raw Dataset/DataLoader
+
+| Aspect | Raw PyTorch | LightningDataModule |
+| :--- | :--- | :--- |
+| Data Loading | In training script | In dedicated class |
+| Reusability | Copy-paste across projects | Import and reuse |
+| Device Placement | Manual | Automatic (DataLoader on correct device) |
+| Multi-GPU | Manual replication | Automatic with ` DistributedSampler` |
+| Switching Datasets | Modify training script | Pass different DataModule |
+
+### Raw PyTorch
+
+```python
+# In training script
+train_ds = MNISTDataset(root="data/", train=True)
+val_ds = MNISTDataset(root="data/", train=False)
+train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_ds, batch_size=32)
+
+for epoch in range(epochs):
+    for batch in train_loader:
+        # training logic
+```
+
+### With DataModule
+
+```python
+# Separated concerns
+class MNISTData(L.LightningDataModule):
+    def setup(self, stage):
+        self.train_ds = MNISTDataset(root="data/", train=True)
+        self.val_ds = MNISTDataset(root="data/", train=False)
+    
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, batch_size=32, shuffle=True)
+    
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, batch_size=32)
+
+# Training script is clean
+trainer = L.Trainer()
+trainer.fit(model, datamodule=MNISTData())
+```
+
+## Full Example: MNIST with Transforms
+
+```python
+import lightning as L
+import torch
+import torchvision
+from torchvision import transforms
+
+class MNISTData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.save_hyperparameters()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str = None):
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
+        
+        if stage == "fit" or stage is None:
+            self.mnist_train = torchvision.datasets.MNIST(
+                root=self.data_dir, train=True, transform=transform, download=True
+            )
+            self.mnist_val = torchvision.datasets.MNIST(
+                root=self.data_dir, train=False, transform=transform, download=True
+            )
+        
+        if stage == "test":
+            self.mnist_test = torchvision.datasets.MNIST(
+                root=self.data_dir, train=False, transform=transform, download=True
+            )
+    
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_train,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_val,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def test_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_test,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4
+        )
+```
+
+## Sharing Data Between Model and DataModule
+
+Use `save_hyperparameters()` and access configuration:
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        # Model can access DataModule hyperparameters
+        # via trainer.datamodule.hparams
+        pass
+```
+
+For explicit data passing:
+
+```python
+# Option 1: Direct access
+trainer = L.Trainer()
+trainer.fit(model, datamodule=data)
+
+# Option 2: In training step, access via trainer
+def training_step(self, batch, batch_idx):
+    dm = self.trainer.datamodule
+    # Use dm.hparams
+```
+
+:::tip[Consistent Data Interface]
+DataModule provides a consistent interface regardless of the underlying data source. Switch from MNIST to CIFAR-10 to a custom dataset without changing your training code.
+:::
