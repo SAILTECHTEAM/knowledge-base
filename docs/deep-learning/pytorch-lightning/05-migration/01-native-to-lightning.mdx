@@ -538,6 +538,10 @@ For standard training, let Lightning handle optimization automatically.
 
 ---
 
+## Considering Lightning Fabric
+
+If you find the `LightningModule` and `Trainer` structure too restrictive for an extremely custom training loop, consider **Lightning Fabric** (introduced in v2.0). Fabric provides the exact same device and precision management without forcing you into `training_step` hooks. You write your own training loop but wrap your optimizer and model in `fabric.setup()`. This guide focuses on the full `Trainer` experience, but Fabric is a valid middle-ground for complex research code.
+
 ## Quick Reference: Migration Checklist
 
 | Native PyTorch | Lightning Equivalent |

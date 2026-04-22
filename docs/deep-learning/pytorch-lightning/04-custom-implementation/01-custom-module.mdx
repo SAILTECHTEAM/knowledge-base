@@ -263,11 +263,11 @@ Lightning provides step hooks for each phase:
 | Hook | Phase | Description |
 | :--- | :--- | :--- |
 | `training_step` | Train | Process one training batch |
-| `training_step_end` | Train | Aggregate batch-level results (optional) |
-| `training_epoch_end` | Train | Aggregate epoch-level results (optional) |
+| `on_train_batch_end` | Train | Aggregate batch-level results (optional) |
+| `on_train_epoch_end` | Train | Aggregate epoch-level results (optional) |
 | `validation_step` | Validation | Process one validation batch |
-| `validation_step_end` | Validation | Aggregate batch-level results (optional) |
-| `validation_epoch_end` | Validation | Aggregate epoch-level results (optional) |
+| `on_validation_batch_end` | Validation | Aggregate batch-level results (optional) |
+| `on_validation_epoch_end` | Validation | Aggregate epoch-level results (optional) |
 | `test_step` | Test | Process one test batch |
 | `predict_step` | Inference | Process one batch for prediction |
 

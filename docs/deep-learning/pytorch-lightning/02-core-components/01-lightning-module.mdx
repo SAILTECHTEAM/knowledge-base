@@ -41,11 +41,11 @@ class MyModel(L.LightningModule):
 | `__init__` | Init | Initialize layers, hyperparameters |
 | `configure_optimizers` | Init | Set up optimizers and LR schedulers |
 | `training_step` | Training | Process one training batch |
-| `training_epoch_end` | Training | Aggregate epoch-level results |
+| `on_train_epoch_end` | Training | Aggregate epoch-level results |
 | `validation_step` | Validation | Process one validation batch |
-| `validation_epoch_end` | Validation | Aggregate validation results |
+| `on_validation_epoch_end` | Validation | Aggregate validation results |
 | `test_step` | Test | Process one test batch |
-| `test_epoch_end` | Test | Aggregate test results |
+| `on_test_epoch_end` | Test | Aggregate test results |
 | `predict_step` | Inference | Process one batch for prediction |
 
 ## Step Methods
@@ -205,44 +205,39 @@ The model code is identical. The difference is what Lightning provides around it
 
 ## Manual Optimization
 
-When you need full control over the training loop — gradient accumulation, multiple optimizers, custom gradient clipping — use manual optimization:
+When you need full control over the training loop — such as for GANs, multiple optimizers, or custom gradient clipping — use manual optimization. To enable it, set `self.automatic_optimization = False` in your `__init__`.
 
 ```python
 class MyModel(L.LightningModule):
     def __init__(self):
         super().__init__()
-        self.layer = nn.Linear(10, 10)
-    
+        self.layer = nn.Linear(10, 1)
+        # 1. Disable automatic optimization
+        self.automatic_optimization = False
+        
     def training_step(self, batch, batch_idx):
+        # 2. Access the optimizer(s)
+        opt = self.optimizers()
+        
         x, y = batch
         output = self(x)
-        loss = nn.functional.cross_entropy(output, y)
+        loss = F.cross_entropy(output, y)
         
-        # Manual optimization: don't let Lightning step the optimizer
-        return loss
-    
-    def training_step_end(self, outputs):
-        # Manual gradientstep happens here
-        self.manual_optimization_step()
-        return outputs
-    
-    def manual_optimization_step(self):
-        # Custom optimization logic
+        # 3. Clear gradients
+        opt.zero_grad()
+        
+        # 4. Backward pass
         self.manual_backward(loss)
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-        self.optimizers().step()
-        self.optimizers().zero_grad()
-```
-
-Enabling manual optimization:
-
-```python
-trainer = Trainer(enable_model_connected_base_training=False)
+        
+        # (Optional) Custom gradient clipping
+        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+        
+        # 5. Step optimizer
+        opt.step()
 ```
 
 :::caution[Manual Optimization]
-Only use manual optimization when necessary. It bypasses Lightning's automatic optimization and makes your code harder to scale to distributed training. Consider if the built-in flags (`accumulate_grad_batches`, `gradient_clip_val`) meet your needs first.
+Only use manual optimization when necessary. It bypasses Lightning's automatic optimization loops. Consider if the built-in Trainer flags (`accumulate_grad_batches`, `gradient_clip_val`) meet your needs first before switching to manual.
 :::
 
 ## Full Example: MNIST Classifier

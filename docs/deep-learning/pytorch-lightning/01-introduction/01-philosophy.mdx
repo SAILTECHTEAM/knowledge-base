@@ -109,3 +109,10 @@ One of Lightning's strongest benefits is native distributed training support. Wi
 - **FSDP**: `strategy="fsdp"`
 
 The same model code runs on all these configurations — the only change is the Trainer flags.
+## A Note on Lightning Fabric
+
+If you want the device management and distributed scaling of Lightning without the rigid structure of `LightningModule` and `Trainer`, Lightning 2.0 introduced **Lightning Fabric**. 
+
+Fabric is a fast and lightweight way to scale raw PyTorch. It provides a minimal `fabric` object that you inject into your existing raw PyTorch loops, giving you DeepSpeed, FSDP, and Mixed Precision support while letting you keep your exact custom training loop structure.
+
+This tutorial focuses on the full `LightningModule` + `Trainer` experience, but keep Fabric in mind if you have an extremely custom loop that doesn't fit well into Lightning's hook system.

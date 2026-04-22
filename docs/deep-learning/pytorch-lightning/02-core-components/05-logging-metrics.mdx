@@ -185,38 +185,21 @@ class MyModel(L.LightningModule):
     
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        preds = self(x)
+        preds = self.model(x)
         
-        # Update metrics
+        # Update metrics directly
         self.accuracy(preds, y)
         self.f1(preds, y)
         
+        # Log the metric objects directly
+        self.log("val_acc", self.accuracy, on_epoch=True)
+        self.log("val_f1", self.f1, on_epoch=True)
+        
         return F.cross_entropy(preds, y)
-    
-    def on_validation_epoch_end(self):
-        # Compute epoch-level metrics
-        acc = self.accuracy.compute()
-        f1 = self.f1.compute()
-        
-        self.log("val_acc", acc, on_epoch=True)
-        self.log("val_f1", f1, on_epoch=True)
-        
-        # Reset for next epoch
-        self.accuracy.reset()
-        self.f1.reset()
 ```
 
-### Metric Reset
-
-```python
-def on_validation_epoch_end(self):
-    # Explicit reset (important!)
-    self.accuracy.reset()
-    self.f1.reset()
-```
-
-:::caution[Metric Reset]
-Metrics must be reset between epochs. Without reset, values accumulate and report incorrect epoch-level metrics.
+:::tip[Automatic Metric Computation and Reset]
+When you log a `torchmetrics.Metric` object directly using `self.log()`, Lightning automatically handles calling `.compute()` at the end of the epoch and `.reset()` at the start of the next epoch. You don't need to implement `on_validation_epoch_end` manually for this.
 :::
 
 ## Common Logging Patterns
@@ -381,10 +364,6 @@ class LitModel(L.LightningModule):
         }, on_step=False, on_epoch=True, prog_bar=True)
         
         return loss
-    
-    def on_validation_epoch_end(self):
-        # Reset accuracy for next epoch
-        self.accuracy.reset()
 ```
 
 ```python

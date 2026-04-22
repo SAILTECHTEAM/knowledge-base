@@ -8,7 +8,7 @@ description: Common anti-patterns in PyTorch Lightning that lead to bugs, perfor
 
 This guide documents common anti-patterns in PyTorch Lightning that should be avoided. These patterns often arise from attempting to replicate native PyTorch behavior directly in Lightning.
 
-## Anti-Pattern 1: Calling `.backward()` in `training_step`
+## Calling `.backward()` in `training_step`
 
 One of the most common mistakes is explicitly calling `.backward()` or `optimizer.step()` inside the training step.
 
@@ -79,7 +79,49 @@ Only use manual optimization when implementing custom gradient behavior. Standar
 
 ---
 
-## Anti-Pattern 2: Managing Devices Inside LightningModule
+
+## Manual Metric Calculation Averaged over Epochs
+
+Manually computing a metric (like accuracy) per batch and logging it with `on_epoch=True` can result in mathematically incorrect epoch averages if your last batch is smaller than the rest. Lightning averages the *values* you return, rather than tracking total correct / total samples.
+
+### Incorrect
+
+```python
+class MyModel(L.LightningModule):
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        
+        # ❌ Wrong: Calculating accuracy manually per-batch
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == y).float().mean()
+        
+        # ❌ Wrong: Logging the manual average will lead to incorrect epoch-level metrics
+        self.log("val_acc", acc, on_epoch=True)
+        return F.cross_entropy(logits, y)
+```
+
+### Correct
+
+```python
+import torchmetrics
+
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ✅ Correct: Use TorchMetrics
+        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=10)
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        
+        # ✅ Correct: TorchMetrics correctly accumulates true positives / total samples
+        self.accuracy(logits, y)
+        self.log("val_acc", self.accuracy, on_epoch=True)
+        return F.cross_entropy(logits, y)
+```
+## Managing Devices Inside LightningModule
 
 Lightning handles device placement automatically. Never manually move tensors to devices.
 
@@ -148,7 +190,7 @@ Never manually call `.to(device)` inside LightningModule hooks.
 
 ---
 
-## Anti-Pattern 3: Hardcoding Paths and Hyperparameters
+## Hardcoding Paths and Hyperparameters
 
 Never hardcode file paths, learning rates, or other hyperparameters in code.
 
@@ -210,7 +252,7 @@ checkpoint_dir = os.environ.get("CHECKPOINT_DIR", "./checkpoints")
 
 ---
 
-## Anti-Pattern 4: Bypassing the Trainer
+## Bypassing the Trainer
 
 Avoid raw PyTorch training loops when using Lightning. The Trainer handles many edge cases.
 
@@ -260,7 +302,7 @@ with torch.no_grad():
 
 ---
 
-## Anti-Pattern 5: Mixed Configuration Strategies
+## Mixed Configuration Strategies
 
 Don't mix Hydra with argparse or other configuration methods.
 
@@ -300,7 +342,7 @@ python train.py model.learning_rate=3e-4 data.batch_size=64
 
 ---
 
-## Anti-Pattern 6: Ignoring `self.log` Synchronization in DDP
+## Ignoring `self.log` Synchronization in DDP
 
 In distributed training, incorrect logging synchronization leads to wrong metrics.
 
@@ -373,7 +415,7 @@ Common issues in distributed training:
 
 ---
 
-## Anti-Pattern 7: Using Deprecated APIs
+## Using Deprecated APIs
 
 Lightning 2.0 deprecated several older APIs. Update code accordingly.
 
@@ -422,7 +464,7 @@ trainer = L.Trainer(accelerator="auto", devices="auto")
 
 ---
 
-## Anti-Pattern 8: Large Batch Sizes Without Gradients
+## Large Batch Sizes Without Gradients
 
 Accumulating gradients incorrectly leads to different effective learning rates.
 
@@ -472,7 +514,7 @@ def training_step(self, batch, batch_idx):
 
 ---
 
-## Anti-Pattern 9: Not Using `train_dataloader` Return Type
+## Not Using `train_dataloader` Return Type
 
 Returning the wrong type causes subtle bugs.
 
@@ -494,7 +536,7 @@ def train_dataloader(self):
 
 ---
 
-## Anti-Pattern 10: State Dict Issues
+## State Dict Issues
 
 Improper state management breaks checkpointing.
 
