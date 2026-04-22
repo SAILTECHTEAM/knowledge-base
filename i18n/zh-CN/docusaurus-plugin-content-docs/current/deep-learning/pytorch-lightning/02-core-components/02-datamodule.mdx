@@ -1,0 +1,310 @@
+---
+sidebar_position: 2
+title: LightningDataModule
+description: 深入了解 LightningDataModule 类以实现标准化数据处理。
+---
+
+# LightningDataModule
+
+`LightningDataModule` 在项目和团队之间标准化了数据加载。它将数据集创建、数据变换（transforms）和数据加载器（data loaders）封装在一个单一的可重用组件中。
+
+## 为什么需要 DataModule
+
+如果没有 DataModule，特定于项目的数据加载逻辑会散落在训练脚本中：
+
+```python
+# 常见模式：数据逻辑在训练脚本中
+class MyTrainer:
+    def setup_data(self):
+        transform = transforms.Compose([...])
+        train_ds = CustomDataset(root="data/", split="train", transform=transform)
+        val_ds = CustomDataset(root="data/", split="val", transform=transform)
+        self.train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+        self.val_loader = DataLoader(val_ds, batch_size=32)
+```
+
+DataModule 将这些内容移动到了一个专门的、可重用的类中：
+
+```python
+class MyData(L.LightningModule):
+    def train_dataloader(self):
+        # 仍然在这里（目前）
+        pass
+```
+
+等等 — 在 Lightning 2.x 中，DataModule 改为使用 `setup()` 和 `_predict_dataloader()` 方法：
+
+```python
+class MyData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str):
+        # 由 Trainer 调用以初始化数据
+        if stage == "fit":
+            # 加载训练数据
+            pass
+        elif stage == "test":
+            # 加载测试数据
+            pass
+```
+
+## 基本结构
+
+```python
+import lightning as L
+import torch
+from torch.utils.data import DataLoader, random_split
+
+class MyData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.save_hyperparameters()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str = None):
+        # 加载并拆分数据集
+        full_dataset = MyDataset(root=self.data_dir)
+        
+        train_size = int(0.8 * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        
+        self.train_dataset, self.val_dataset = random_split(
+            full_dataset, [train_size, val_size]
+        )
+    
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def test_dataloader(self):
+        return DataLoader(
+            self.val_dataset,  # 或者单独的测试集
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4
+        )
+```
+
+## setup 方法
+
+`setup(stage)` 方法由 Trainer 调用来准备数据：
+
+| 阶段 (Stage) | 调用时机 | 典型用途 |
+| :--- | :--- | :--- |
+| `"fit"` | `trainer.fit()` | 加载训练/验证数据集 |
+| `"test"` | `trainer.test()` | 加载测试数据集 |
+| `"predict"` | `trainer.predict()` | 加载预测数据集 |
+
+```python
+def setup(self, stage: str):
+    if stage == "fit":
+        # 训练和验证数据
+        self.train_ds = MyDataset(root=self.data_dir, split="train")
+        self.val_ds = MyDataset(root=self.data_dir, split="val")
+    
+    elif stage == "test":
+        # 测试数据
+        self.test_ds = MyDataset(root=self.data_dir, split="test")
+    
+    elif stage == "predict":
+        # 用于预测的无标签数据
+        self.predict_ds = MyDataset(root=self.data_dir, split="predict")
+```
+
+:::tip[延迟加载 (Lazy Loading)]
+为了提高效率，请在 `setup()` 内部而不是 `__init__()` 中加载数据。`setup()` 会在进行训练的设备上被调用，因此数据会在需要的地方被加载。
+:::
+
+## DataLoader 方法
+
+| 方法 | 阶段 | 描述 |
+| :--- | :--- | :--- |
+| `train_dataloader` | Fit/Validate | 返回训练 DataLoader |
+| `val_dataloader` | Fit/Validate | 返回验证 DataLoader |
+| `test_dataloader` | Test | 返回测试 DataLoader |
+| `predict_dataloader` | Predict | 返回预测 DataLoader |
+
+```python
+def train_dataloader(self):
+    return DataLoader(
+        self.train_ds,
+        batch_size=self.batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        drop_last=True  # 有助于梯度稳定性
+    )
+```
+
+### 多个 DataLoader
+
+返回一个列表以使用多个 DataLoader（例如，用于多模态学习）：
+
+```python
+def train_dataloader(self):
+    return [
+        DataLoader(self.image_ds, batch_size=32, shuffle=True),
+        DataLoader(self.text_ds, batch_size=32, shuffle=True),
+    ]
+```
+
+在 `training_step` 中，访问多个批次（batches）：
+
+```python
+def training_step(self, batch, batch_idx):
+    image_batch, text_batch = batch  # 来自两个 dataloader
+    # ...
+```
+
+## 与原生 Dataset/DataLoader 的比较
+
+| 方面 | 原生 PyTorch | LightningDataModule |
+| :--- | :--- | :--- |
+| 数据加载 | 在训练脚本中 | 在专门的类中 |
+| 可重用性 | 在项目之间复制粘贴 | 导入并重用 |
+| 设备放置 | 手动 | 自动 (DataLoader 在正确的设备上) |
+| 多 GPU | 手动复制 | 使用 `DistributedSampler` 自动处理 |
+| 切换数据集 | 修改训练脚本 | 传入不同的 DataModule |
+
+### 原生 PyTorch
+
+```python
+# 在训练脚本中
+train_ds = MNISTDataset(root="data/", train=True)
+val_ds = MNISTDataset(root="data/", train=False)
+train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_ds, batch_size=32)
+
+for epoch in range(epochs):
+    for batch in train_loader:
+        # 训练逻辑
+```
+
+### 使用 DataModule
+
+```python
+# 关注点分离
+class MNISTData(L.LightningDataModule):
+    def setup(self, stage):
+        self.train_ds = MNISTDataset(root="data/", train=True)
+        self.val_ds = MNISTDataset(root="data/", train=False)
+    
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, batch_size=32, shuffle=True)
+    
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, batch_size=32)
+
+# 训练脚本很干净
+trainer = L.Trainer()
+trainer.fit(model, datamodule=MNISTData())
+```
+
+## 完整示例：带有 Transforms 的 MNIST
+
+```python
+import lightning as L
+import torch
+import torchvision
+from torchvision import transforms
+
+class MNISTData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.save_hyperparameters()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str = None):
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
+        
+        if stage == "fit" or stage is None:
+            self.mnist_train = torchvision.datasets.MNIST(
+                root=self.data_dir, train=True, transform=transform, download=True
+            )
+            self.mnist_val = torchvision.datasets.MNIST(
+                root=self.data_dir, train=False, transform=transform, download=True
+            )
+        
+        if stage == "test":
+            self.mnist_test = torchvision.datasets.MNIST(
+                root=self.data_dir, train=False, transform=transform, download=True
+            )
+    
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_train,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_val,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def test_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_test,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4
+        )
+```
+
+## 在 Model 和 DataModule 之间共享数据
+
+使用 `save_hyperparameters()` 并访问配置：
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        # Model 可以访问 DataModule 的超参数
+        # 通过 trainer.datamodule.hparams
+        pass
+```
+
+对于显式的数据传递：
+
+```python
+# 选项 1：直接访问
+trainer = L.Trainer()
+trainer.fit(model, datamodule=data)
+
+# 选项 2：在 training step 中，通过 trainer 访问
+def training_step(self, batch, batch_idx):
+    dm = self.trainer.datamodule
+    # 使用 dm.hparams
+```
+
+:::tip[一致的数据接口]
+无论底层数据源是什么，DataModule 都提供了一致的接口。无需更改训练代码即可从 MNIST 切换到 CIFAR-10 再到自定义数据集。
+:::

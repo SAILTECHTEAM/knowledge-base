@@ -1,0 +1,240 @@
+---
+sidebar_position: 1
+title: 專案結構 (Project Structure)
+description: Lightning + Hydra 專案的目錄佈局、進入點和組織方式。
+---
+
+# 專案結構 (Project Structure)
+
+一個組織良好的專案結構對於可重現的機器學習實驗至關重要。本文件概述了基於 [Lightning-Hydra Template](https://github.com/ashleve/lightning-hydra-template) 的推薦目錄佈局，這是 PyTorch Lightning + Hydra 專案的規範鷹架。
+
+:::note[模板參考]
+本頁面文件使用 [Lightning-Hydra Template](https://github.com/ashleve/lightning-hydra-template) 作為規範參考。此處展示的結構反映了使用 Lightning 和 Hydra 進行 ML 實驗的既定最佳實務。
+:::
+
+## 目錄佈局
+
+```text
+project/
+├── .github/                  # CI/CD 的 GitHub Actions 工作流程
+├── configs/                 # Hydra 設定檔
+│   ├── callbacks/          # 回呼函數 (Callback) 設定
+│   ├── datamodule/         # 資料模組 (DataModule) 設定
+│   ├── debug/             # 除錯專用設定
+│   ├── experiment/        # 實驗設定
+│   ├── logger/           # 日誌記錄器 (Logger) 設定
+│   ├── model/             # 模型設定
+│   ├── module/           # LightningModule 設定
+│   ├── optimizer/         # 最佳化器設定
+│   ├── scheduler/        # 學習率排程器設定
+│   ├── trainer/          # 訓練器 (Trainer) 設定
+│   ├── default.yaml      # 預設設定
+│   └── hydra/            # Hydra 內部設定
+├── data/                   # 資料檔案
+├── logs/                   # 日誌輸出 (tensorboard, wandb 等)
+├── models/                 # 儲存的模型權重檔案 (checkpoints)
+├── scripts/                # 獨立的訓練/評估腳本
+│   ├── eval.py            # 評估腳本
+│   ├── export.py          # 模型匯出腳本
+│   └── train.py           # 主訓練腳本
+├── src/                    # 原始碼
+│   ├── data/              # 資料載入模組
+│   ├── models/            # 模型定義
+│   ├── utils/             # 工具函數
+│   └── __init__.py
+├── tests/                  # 單元測試
+├── README.md
+├── requirements.txt
+└── setup.py
+```
+
+## 各目錄用途
+
+### `configs/`
+
+`configs/` 目錄包含所有 Hydra 設定檔。這是定義實驗參數的地方：
+
+| 子目錄 | 用途 |
+| :--- | :--- |
+| `callbacks/` | 自訂回呼函數設定 |
+| `datamodule/` | DataModule 類別和資料集設定 |
+| `model/` | 模型架構參數 |
+| `module/` | LightningModule 類別和訓練邏輯 |
+| `optimizer/` | 最佳化器設定 |
+| `scheduler/` | 學習率排程器設定 |
+| `trainer/` | Trainer 標誌位元（設備、加速器等） |
+| `logger/` | 日誌記錄後端設定 |
+| `experiment/` | 完整的實驗設定 |
+| `debug/` | 除錯專用的覆寫設定 |
+
+### `src/`
+
+`src/` 目錄包含核心 Python 模組：
+
+| 子目錄 | 用途 |
+| :--- | :--- |
+| `data/` | 資料載入和處理邏輯 |
+| `models/` | 模型架構 |
+| `utils/` | 輔助工具（實例化、日誌設定） |
+
+### `scripts/`
+
+`scripts/` 目錄包含進入點腳本：
+
+| 腳本 | 用途 |
+| :--- | :--- |
+| `train.py` | 主訓練進入點 |
+| `eval.py` | 基於已儲存權重的評估 |
+| `export.py` | 匯出模型用於推論 |
+
+## 進入點
+
+### train.py
+
+主訓練腳本使用 `@hydra.main` 裝飾器來啟用設定管理：
+
+```python
+# scripts/train.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # 從設定實例化元件
+    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.datamodule)
+    model: LightningModule = hydra.utils.instantiate(cfg.module)
+    
+    # 設定回呼函數和日誌記錄器
+    callbacks = instantiate_callbacks(cfg.get("callbacks", {}))
+    loggers = instantiate_loggers(cfg.get("logger", {}))
+    
+    # 建立訓練器
+    trainer = Trainer(
+        **cfg.trainer,
+        callbacks=callbacks,
+        logger=loggers,
+    )
+    
+    # 開始訓練
+    trainer.fit(model, datamodule=datamodule)
+
+if __name__ == "__main__":
+    main()
+```
+
+執行訓練：
+
+```bash
+python scripts/train.py
+# 或使用參數覆寫
+python scripts/train.py model.lr=1e-4 trainer.max_epochs=100
+```
+*(注意：這裡將英文版中錯誤的 `python src/train.py` 修正為 `python scripts/train.py`)*
+
+### eval.py
+
+評估腳本載入權重並執行推論：
+
+```python
+# scripts/eval.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # 載入權重
+    model = LitModel.load_from_checkpoint(cfg.ckpt_path)
+    
+    # 執行評估
+    trainer = Trainer(accelerator="cpu")
+    trainer.test(model)
+```
+
+### export.py
+
+匯出腳本將模型權重轉換為部署格式：
+
+```python
+# scripts/export.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    model = LitModel.load_from_checkpoint(cfg.ckpt_path)
+    
+    # 匯出到 ONNX/TorchScript
+    model.to_onnx(cfg.export_path)
+```
+
+## 為什麼這種結構很重要
+
+### 可重現性
+
+每個實驗設定都儲存為 YAML 檔案。一個完整的實驗可以透過以下方式重現：
+
+1. 檢出特定 commit 的程式碼
+2. 使用相同的設定檔
+3. 執行相同的命令
+
+### 設定組合
+
+該結構透過 Hydra 的 `defaults` 列表實現設定的組合：
+
+```yaml
+# configs/experiment/my_experiment.yaml
+defaults:
+  - model: my_model
+  - datamodule: my_data
+  - optimizer: adam
+  - scheduler: cosine
+  - trainer: gpu
+```
+
+### 團隊協作
+
+一致的結構意味著任何團隊成員都能立即在一個陌生的專案中導航。關於在哪裡找到設定、模型程式碼或資料載入邏輯不再有任何歧義。
+
+### 實驗追蹤
+
+將設定與程式碼分離，使日誌框架能夠追蹤實驗之間發生的變化。設定檔本身也成為了實驗參數的記錄。
+
+## 預設設定
+
+預設設定將所有內容連接在一起：
+
+```yaml
+# configs/default.yaml
+defaults:
+  - trainer: default
+  - model: default
+  - datamodule: default
+  - optimizer: adam
+  - scheduler: cosine
+  - callbacks: default
+  - logger: tensorboard
+
+# 覆寫特定參數
+trainer:
+  max_epochs: 10
+
+model:
+  lr: 1e-3
+```
+
+## 使用自訂設定執行
+
+```bash
+# 使用預設設定
+python scripts/train.py
+
+# 從命令列覆寫
+python scripts/train.py trainer.max_epochs=100 model.lr=1e-4
+
+# 使用特定的實驗設定
+python scripts/train.py +experiment=my_experiment
+
+# 除錯模式 (快速開發執行)
+python scripts/train.py +debug=default
+```
+
+:::tip[目錄組織]
+保持每個設定檔專注於單一關注點。模組化設定（如 model, optimizer, datamodule）可以組合在一起，而 experiment 設定則結合這些模組化片段。
+:::
+
+## 下一步
+
+- [Hydra 基礎 (Hydra Basics)](./hydra-basics): 學習 Hydra 的基本概念
+- [設定組合 (Config Composition)](./config-composition): 組合複雜的實驗
+- [實例化 (Instantiation)](./instantiation): 從設定中實例化元件

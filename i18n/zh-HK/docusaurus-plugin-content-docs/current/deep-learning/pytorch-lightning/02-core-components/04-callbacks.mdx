@@ -1,0 +1,282 @@
+---
+sidebar_position: 4
+title: Callbacks
+description: 深入了解 Lightning 回呼 (Callback) 系統以實現可擴展性和自訂。
+---
+
+# 回呼 (Callbacks)
+
+回呼 (Callbacks) 是 Lightning 中的可擴展性系統。它們允許你在訓練生命週期的特定時間點注入自訂邏輯，而無需修改模型程式碼。
+
+## 為什麼需要回呼
+
+在原生 PyTorch 中，你要麼修改訓練迴圈，要麼以命令式的方式插入程式碼：
+
+```python
+# 原生 PyTorch：修改訓練迴圈
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        # 訓練步驟
+        loss.backward()
+        
+        # 自訂邏輯：每 1000 步保存一次檢查點
+        if global_step % 1000 == 0:
+            save_checkpoint()
+        
+        # 自訂邏輯：記錄到 wandb
+        wandb.log({"loss": loss})
+        
+        # 自訂邏輯：早停 (early stopping)
+        if val_loss < best_loss:
+            best_loss = val_loss
+        elif val_loss > best_loss + patience:
+            break
+```
+
+Lightning 將這些功能轉移到了回呼中：
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        ModelCheckpoint(...),   # 自動保存
+        EarlyStopping(...),     # 自動停止
+        LearningRateMonitor(), # 追蹤學習率
+    ]
+)
+```
+
+## 回呼結構
+
+```python
+import lightning as L
+from lightning.callbacks import Callback
+
+class MyCallback(Callback):
+    def on_train_start(self, trainer, pl_module):
+        """在訓練開始時呼叫。"""
+        pass
+    
+    def on_train_epoch_start(self, trainer, pl_module):
+        """在每個 epoch 開始時呼叫。"""
+        pass
+    
+    def on_train_batch_start(
+        self, trainer, pl_module, batch, batch_idx
+    ):
+        """在處理批次之前呼叫。"""
+        pass
+    
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx
+    ):
+        """在處理批次之後呼叫。"""
+        pass
+    
+    def on_validation_epoch_end(
+        self, trainer, pl_module, logs
+    ):
+        """在驗證結束時呼叫。"""
+        pass
+    
+    def on_train_end(self, trainer, pl_module):
+        """在訓練結束時呼叫。"""
+        pass
+```
+
+## 回呼鉤子 (Hooks) 參考
+
+### 訓練生命週期鉤子
+
+| 鉤子 (Hook) | 呼叫時機 |
+| :--- | :--- |
+| `on_fit_start` | 在訓練開始前 |
+| `on_fit_end` | 在訓練結束後 |
+| `on_pretune_routine_start` | 在調整 (tuning) 開始前 |
+
+### Epoch 鉤子
+
+| 鉤子 (Hook) | 呼叫時機 |
+| :--- | :--- |
+| `on_train_epoch_start` | 在 epoch 開始前 |
+| `on_train_epoch_end` | 在 epoch 結束後 |
+| `on_validation_epoch_start` | 在驗證開始前 |
+| `on_validation_epoch_end` | 在驗證結束後 |
+
+### Batch 鉤子
+
+| 鉤子 (Hook) | 呼叫時機 |
+| :--- | :--- |
+| `on_train_batch_start` | 在批次處理前 |
+| `on_train_batch_end` | 在批次處理後 |
+| `on_validation_batch_start` | 在驗證批次前 |
+| `on_validation_batch_end` | 在驗證批次後 |
+
+### 其他鉤子
+
+| 鉤子 (Hook) | 呼叫時機 |
+| :--- | :--- |
+| `on_save_checkpoint` | 在保存檢查點前 |
+| `on_load_checkpoint` | 在載入檢查點後 |
+| `on_exception` | 在引發例外時 |
+
+## 內建回呼
+
+### ModelCheckpoint
+
+根據監控的指標保存模型權重：
+
+```python
+from lightning import callbacks
+
+checkpoint = callbacks.ModelCheckpoint(
+    dirpath="checkpoints/",
+    filename="{epoch}-{val_loss:.2f}",
+    monitor="val_loss",
+    mode="min",           # "min" 或 "max"
+    save_top_k=3,         # 保留最好的 3 個模型
+    save_last=True,       # 總是保存 "last.ckpt"
+    auto_insert_metric_name=False,
+    every_n_epochs=1,     # 每 N 個 epoch 保存一次
+    train_time_interval="1ep"  # 或者 "1step", "epoch"
+)
+```
+
+| 參數 | 描述 |
+| :--- | :--- |
+| `monitor` | 要監控的指標 |
+| `mode` | 對於損失使用 `"min"` (越低越好)，對於準確率使用 `"max"` |
+| `save_top_k` | 要保留的最好模型的數量 |
+| `save_last` | 總是保存最近的模型 |
+
+### EarlyStopping
+
+當指標停止改善時停止訓練：
+
+```python
+early_stop = callbacks.EarlyStopping(
+    monitor="val_loss",
+    mode="min",
+    patience=5,           # 在沒有改善的情況下 5 個 epoch 後停止
+    min_delta=0.001,     # 算作改善的最小變化
+    verbose=True,
+    stopping_threshold=0.1,  # 如果低於此值則立即停止
+    check_on_train_epoch_end=False,  # 在 epoch 結束時檢查 (而不是 batch)
+)
+```
+
+### LearningRateMonitor
+
+將學習率記錄到所有日誌記錄器：
+
+```python
+lr_monitor = callbacks.LearningRateMonitor(
+    logging="interval",  # "interval" 或 "epoch"
+    interval="step",    # 每個 "step" 或 "epoch" 更新
+    log_momentum=True,  # 如果使用排程器，則記錄動量 (momentum)
+)
+```
+
+### ProgressBar
+
+控制進度條：
+
+```python
+progress_bar = callbacks.ProgressBar(
+    refresh_rate=1,     # 每 N 個批次更新一次 (0 = 停用)
+    process_position=0, # 在多 GPU 中的位置
+)
+```
+
+### ModelSummary
+
+將模型摘要添加到日誌記錄器：
+
+```python
+model_summary = callbacks.ModelSummary(
+    max_depth=2         # 摘要的深度
+)
+```
+
+## 執行順序
+
+回呼按照它們傳遞給 Trainer 的順序執行：
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        LearningRateMonitor(),     # 第一
+        ModelCheckpoint(...),    # 第二
+        EarlyStopping(...),       # 第三
+    ]
+)
+```
+
+在單一鉤子類型 (例如 `on_train_batch_start`) 內部，回呼按照此順序執行。
+
+:::caution[執行順序]
+在多 GPU 訓練中，執行順序取決於策略。使用 `"ddp"` 時，回呼僅在主處理程序上執行。
+:::
+
+## 自訂回呼範例
+
+```python
+import lightning as L
+
+class CustomMetricTracker(Callback):
+    def __init__(self):
+        self.best_loss = float("inf")
+    
+    def on_train_start(self, trainer, pl_module):
+        print("訓練開始！")
+    
+    def on_validation_epoch_end(self, trainer, pl_module, logs):
+        val_loss = logs.get("val_loss")
+        
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            print(f"新的最佳損失: {val_loss:.4f}")
+        
+        # 如果損失爆炸，則強制停止
+        if val_loss > self.best_loss * 10:
+            print("損失爆炸！正在停止。")
+            trainer.should_stop = True
+    
+    def on_train_end(self, trainer, pl_module):
+        print(f"訓練完成。最佳損失: {self.best_loss:.4f}")
+```
+
+## 使用多個回呼
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        callbacks.ModelCheckpoint(
+            monitor="val_loss",
+            save_top_k=3,
+            every_n_epochs=2
+        ),
+        callbacks.EarlyStopping(
+            monitor="val_loss",
+            patience=10,
+        ),
+        callbacks.LearningRateMonitor(
+            interval="epoch"
+        ),
+        MyCustomCallback(),
+    ]
+)
+```
+
+## 比較
+
+| 方面 | 原生 PyTorch | Lightning |
+| :--- | :--- | :--- |
+| 檢查點 | 手動保存/載入 | `ModelCheckpoint` |
+| 早停 | 手動檢查 + break | `EarlyStopping` |
+| 學習率監控 | 手動記錄 | `LearningRateMonitor` |
+| 自訂邏輯 | 修改迴圈 | 增加回呼 |
+| 可重複使用性 | 複製貼上 | 匯入並使用 |
+
+:::tip[組合回呼]
+為你的團隊的常見模式 (例如，梯度監控、異常值檢測、自訂指標追蹤) 建立一個自訂回呼庫。
+:::

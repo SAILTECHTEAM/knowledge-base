@@ -1,0 +1,549 @@
+---
+sidebar_position: 2
+title: Custom DataModule
+description: Building a custom LightningDataModule with prepare_data, setup, dataset and DataLoader patterns.
+---
+
+# 自訂 DataModule (Custom DataModule)
+
+本文檔介紹了如何建構自訂 `LightningDataModule` —— 這是在 Lightning 中管理數據載入的標準方式。內容包括完整的類別模板、生命週期方法、Dataset 模式以及多數據集場景。
+
+## 完整類別模板
+
+```python
+import lightning as L
+import torch
+from torch.utils.data import DataLoader, random_split
+from torchvision import datasets, transforms
+
+
+class MyDataModule(L.LightningDataModule):
+    """用於你的數據集的自訂 DataModule。
+    
+    Args:
+        data_dir: 數據集的根目錄。
+        batch_size: DataLoader 的批次大小。
+        num_workers: 數據載入的 worker 數量。
+        val_split: 驗證集的數據比例。
+    """
+    
+    def __init__(
+        self,
+        data_dir: str = "./data",
+        batch_size: int = 32,
+        num_workers: int = 4,
+        val_split: float = 0.1,
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.val_split = val_split
+    
+    def prepare_data(self):
+        """下載數據集。此方法在單個進程上僅被呼叫一次。
+        
+        使用此方法下載數據 (例如從遠端存儲)。
+        不要在這裡分配狀態 (state) 給 self。
+        """
+        # 下載數據集 (在分散式訓練中，只在 rank 0 執行)
+        datasets.MNIST(self.data_dir, train=True, download=True)
+        datasets.MNIST(self.data_dir, train=False, download=True)
+    
+    def setup(self, stage: str):
+        """載入數據集。在分散式訓練中，此方法會在每個進程上被呼叫。
+        
+        Args:
+            stage: 'fit', 'validate', 'test' 或 'predict' 其中之一。
+        """
+        if stage == "fit" or stage == "validate":
+            full_data = datasets.MNIST(
+                self.data_dir,
+                train=True,
+                transform=transforms.ToTensor(),
+            )
+            
+            # 劃分訓練集和驗證集
+            val_size = int(len(full_data) * self.val_split)
+            train_size = len(full_data) - val_size
+            
+            self.train_data, self.val_data = random_split(
+                full_data, [train_size, val_size]
+            )
+        
+        if stage == "test" or stage == "predict":
+            self.test_data = datasets.MNIST(
+                self.data_dir,
+                train=False,
+                transform=transforms.ToTensor(),
+            )
+    
+    def train_dataloader(self):
+        """建立訓練 DataLoader。"""
+        return DataLoader(
+            self.train_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+            pin_memory=True,
+        )
+    
+    def val_dataloader(self):
+        """建立驗證 DataLoader。"""
+        return DataLoader(
+            self.val_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+            pin_memory=True,
+        )
+    
+    def test_dataloader(self):
+        """建立測試 DataLoader。"""
+        return DataLoader(
+            self.test_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+            pin_memory=True,
+        )
+    
+    def predict_dataloader(self):
+        """建立預測 DataLoader。"""
+        return DataLoader(
+            self.test_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+            pin_memory=True,
+        )
+```
+
+## 生命周期方法
+
+LightningDataModule 擁有三個核心生命週期方法：
+
+```mermaid
+flowchart TD
+    A[prepare_data] --> B[setup fit]
+    A --> C[setup test]
+    A --> D[setup predict]
+    B --> E[train_dataloader]
+    B --> F[val_dataloader]
+    C --> G[test_dataloader]
+    D --> H[predict_dataloader]
+    
+```
+
+### prepare_data vs setup
+
+| 方法 | 呼叫時機 | 使用場景 |
+| :--- | :--- | :--- |
+| `prepare_data` | 僅一次，單個進程 | 下載、解壓、保存到磁碟 |
+| `setup` | 每個進程 | 將數據載入到內存中，建立 Dataset 實例 |
+
+```python
+def prepare_data(self):
+    """在單個進程上僅下載一次數據。"""
+    # 從遠端下載
+    download_dataset("s3://bucket/data", self.data_dir)
+    
+    # 解壓檔案
+    extract_archive(f"{self.data_dir}.zip")
+
+def setup(self, stage):
+    """在每個進程上載入數據。"""
+    self.dataset = load_dataset(self.data_dir)
+```
+
+:::caution[prepare_data 競態條件]
+`prepare_data` 會在單一進程上運行。只用它執行那些應該發生一次的操作（如下載和解壓）。不要用它進行需要多進程支援的數據載入操作。
+:::
+
+## Dataset 模式
+
+### PyTorch Dataset
+
+```python
+from torch.utils.data import Dataset
+
+
+class MyDataset(Dataset):
+    def __init__(self, data, targets):
+        self.data = data
+        self.targets = targets
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        return self.data[idx], self.targets[idx]
+```
+
+### 懶載入 (Lazy Loading)
+
+```python
+class LazyDataset(Dataset):
+    def __init__(self, data_dir, transform=None):
+        self.data_dir = data_dir
+        self.transform = transform
+        self.samples = os.listdir(data_dir)
+    
+    def __len__(self):
+        return len(self.samples)
+    
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.data_dir, self.samples[idx])
+        image = Image.open(img_path).convert("RGB")
+        
+        if self.transform:
+            image = self.transform(image)
+        
+        return image, idx
+```
+
+### 內存映射 (Memory-Mapped) Dataset
+
+```python
+class MmapDataset(Dataset):
+    def __init__(self, data_path):
+        self.data = np.load(data_path, mmap_mode="r")
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        return torch.from_numpy(self.data[idx].copy())
+```
+
+## DataLoader 模式
+
+### 標準 DataLoader
+
+```python
+def train_dataloader(self):
+    return DataLoader(
+        self.train_data,
+        batch_size=self.batch_size,
+        shuffle=True,
+        num_workers=self.num_workers,
+        pin_memory=True,
+        persistent_workers=True if self.num_workers > 0 else False,
+        drop_last=True,
+    )
+```
+
+### 帶有 Sampler 的 DataLoader
+
+```python
+def train_dataloader(self):
+    sampler = torch.utils.data.distributed.DistributedSampler(
+        self.train_data,
+        num_replicas=trainer.world_size,
+        rank=trainer.global_rank,
+        shuffle=True,
+    )
+    
+    return DataLoader(
+        self.train_data,
+        batch_size=self.batch_size,
+        sampler=sampler,
+        num_workers=self.num_workers,
+        pin_memory=True,
+    )
+```
+
+### 分散式 DataLoader
+
+在 Lightning 中進行分散式訓練時，Lightning 會使用 `replace_sampler_ddp` 自動替換採樣器：
+
+```python
+def train_dataloader(self):
+    return DataLoader(
+        self.train_data,
+        batch_size=self.batch_size,
+        shuffle=True,
+        num_workers=self.num_workers,
+    )
+
+# Lightning 會在分散式訓練時自動替換 sampler
+```
+
+## 多數據集場景
+
+### 多個數據源
+
+```python
+class MultiDomainDataModule(L.LightningDataModule):
+    def __init__(self, sources: list, batch_size: int = 32):
+        super().__init__()
+        self.sources = sources
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str):
+        self.datasets = {}
+        
+        for source in self.sources:
+            self.datasets[source] = load_dataset(source, stage)
+    
+    def train_dataloader(self):
+        loaders = [
+            DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+            for dataset in self.datasets.values()
+        ]
+        
+        # 交替來自各個數據集的 batch
+        return torch.utils.data.Interleave(loaders, "equal")
+```
+
+### 領域拼接 (Domain Concatenation)
+
+```python
+class ConcatDataModule(L.LightningDataModule):
+    def setup(self, stage):
+        # 拼接多個數據集
+        datasets = []
+        
+        for source in self.sources:
+            datasets.append(load_dataset(source))
+        
+        self.train_data = ConcatDataset(datasets)
+```
+
+### 條件載入
+
+```python
+class ConditionalDataModule(L.LightningDataModule):
+    def __init__(self, mode: str = "train"):
+        super().__init__()
+        self.mode = mode
+    
+    def setup(self, stage):
+        if self.mode == "train":
+            self.data = load_train_data()
+        else:
+            self.data = load_test_data()
+```
+
+## 配合 Hydra 使用
+
+### 配置定義
+
+```yaml
+# configs/datamodule/mnist.yaml
+_target_: src.data.MNISTDataModule
+data_dir: ./data
+batch_size: 64
+num_workers: 4
+val_split: 0.1
+```
+
+### 實例化
+
+```python
+from hydra.utils import instantiate
+
+@dataclass
+class DataModuleConfig:
+    _target_: str = "src.data.MNISTDataModule"
+    data_dir: str = "./data"
+    batch_size: int = 64
+    num_workers: int = 4
+
+# instantiate 建立 DataModule
+datamodule = instantiate(cfg.datamodule)
+```
+
+### 完整配置範例
+
+```yaml
+# configs/datamodule/imagenet.yaml
+_target_: src.data.ImageNetDataModule
+data_dir: ${env:DATA_DIR}
+batch_size: 256
+num_workers: 8
+image_size: 224
+normalize:
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+augmentation: random_resized_crop
+```
+
+## 範例：MNIST DataModule
+
+```python
+import lightning as L
+import torch
+from torch.utils.data import DataLoader, random_split
+from torchvision import datasets, transforms
+
+
+class MNISTDataModule(L.LightningDataModule):
+    def __init__(
+        self,
+        data_dir: str = "./data",
+        batch_size: int = 32,
+        num_workers: int = 4,
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+    
+    def transform(self):
+        return transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ])
+    
+    def prepare_data(self):
+        datasets.MNIST(self.data_dir, train=True, download=True)
+        datasets.MNIST(self.data_dir, train=False, download=True)
+    
+    def setup(self, stage: str):
+        if stage == "fit":
+            train_data = datasets.MNIST(
+                self.data_dir,
+                train=True,
+                transform=self.transform(),
+            )
+            
+            self.train_data, self.val_data = random_split(
+                train_data, [55000, 5000]
+            )
+        
+        if stage == "test":
+            self.test_data = datasets.MNIST(
+                self.data_dir,
+                train=False,
+                transform=self.transform(),
+            )
+    
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+        )
+    
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+        )
+    
+    def test_dataloader(self):
+        return DataLoader(
+            self.test_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+        )
+```
+
+## 最佳實踐
+
+### Worker 數量 (Number of Workers)
+
+```python
+def __init__(self, num_workers: int = 4):
+    # 將 num_workers 設置為 CPU 核心數以獲得最佳載入速度
+    # 使用 0 進行除錯 (禁用多進程)
+    self.num_workers = num_workers
+```
+
+:::tip[Worker Count]
+開始時，使用 `num_workers = 0` 進行除錯。一旦代碼能正常運行，可以將其增加到 CPU 核心數（通常是 4-8）。並非 worker 越多就越快，可以透過基準測試找到最佳值。
+:::
+
+### Pin Memory (鎖頁內存)
+
+```python
+return DataLoader(
+    dataset,
+    batch_size=self.batch_size,
+    pin_memory=True,  # 加速 GPU 數據傳輸
+    # ...
+)
+```
+
+### Persistent Workers
+
+```python
+return DataLoader(
+    dataset,
+    batch_size=self.batch_size,
+    persistent_workers=True,  # 避免在不同 epoch 之間重啟 worker
+    # ...
+)
+```
+
+## 常見模式
+
+### 懶載入 Dataset
+
+```python
+def setup(self, stage):
+    # 只載入需要的部分
+    if stage in ("fit", "validate"):
+        self.data = load_train_data()
+```
+
+### 數據增強 (Data Augmentation)
+
+```python
+def train_dataloader(self):
+    return DataLoader(
+        self.train_data,
+        batch_size=self.batch_size,
+        shuffle=True,
+        # ...
+    )
+
+def val_dataloader(self):
+    # 驗證時不需要數據增強
+    return DataLoader(
+        self.val_data,
+        batch_size=self.batch_size,
+        shuffle=False,
+        # ...
+    )
+```
+
+### 類別平衡 (Class Balancing)
+
+```python
+def train_dataloader(self):
+    weights = self.get_class_weights()
+    sampler = WeightedRandomSampler(
+        weights,
+        num_samples=len(self.train_data),
+        replacement=True,
+    )
+    
+    return DataLoader(
+        self.train_data,
+        batch_size=self.batch_size,
+        sampler=sampler,
+    )
+```
+
+## 下一步
+
+- [Custom Callbacks](./custom-callbacks): 撰寫自訂回調
+- [Optimizer & Scheduler](./optimizer-scheduler): 配置優化器和排程器
+- [Project Structure](../hydra-integration/project-structure): 整體專案組織結構

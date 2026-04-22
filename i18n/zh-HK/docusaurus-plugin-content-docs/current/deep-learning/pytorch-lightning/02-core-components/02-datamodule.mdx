@@ -1,0 +1,310 @@
+---
+sidebar_position: 2
+title: LightningDataModule
+description: 深入了解 LightningDataModule 類別以實現標準化資料處理。
+---
+
+# LightningDataModule
+
+`LightningDataModule` 在專案和團隊之間標準化了資料載入。它將資料集建立、資料轉換（transforms）和資料載入器（data loaders）封裝在一個單一的可重複使用元件中。
+
+## 為什麼需要 DataModule
+
+如果沒有 DataModule，特定於專案的資料載入邏輯會散落在訓練腳本中：
+
+```python
+# 常見模式：資料邏輯在訓練腳本中
+class MyTrainer:
+    def setup_data(self):
+        transform = transforms.Compose([...])
+        train_ds = CustomDataset(root="data/", split="train", transform=transform)
+        val_ds = CustomDataset(root="data/", split="val", transform=transform)
+        self.train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+        self.val_loader = DataLoader(val_ds, batch_size=32)
+```
+
+DataModule 將這些內容移動到了一個專門的、可重複使用的類別中：
+
+```python
+class MyData(L.LightningModule):
+    def train_dataloader(self):
+        # 仍然在這裡（目前）
+        pass
+```
+
+等等 — 在 Lightning 2.x 中，DataModule 改為使用 `setup()` 和 `_predict_dataloader()` 方法：
+
+```python
+class MyData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str):
+        # 由 Trainer 呼叫以初始化資料
+        if stage == "fit":
+            # 載入訓練資料
+            pass
+        elif stage == "test":
+            # 載入測試資料
+            pass
+```
+
+## 基本結構
+
+```python
+import lightning as L
+import torch
+from torch.utils.data import DataLoader, random_split
+
+class MyData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.save_hyperparameters()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str = None):
+        # 載入並拆分資料集
+        full_dataset = MyDataset(root=self.data_dir)
+        
+        train_size = int(0.8 * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        
+        self.train_dataset, self.val_dataset = random_split(
+            full_dataset, [train_size, val_size]
+        )
+    
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def test_dataloader(self):
+        return DataLoader(
+            self.val_dataset,  # 或者單獨的測試集
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4
+        )
+```
+
+## setup 方法
+
+`setup(stage)` 方法由 Trainer 呼叫來準備資料：
+
+| 階段 (Stage) | 呼叫時機 | 典型用途 |
+| :--- | :--- | :--- |
+| `"fit"` | `trainer.fit()` | 載入訓練/驗證資料集 |
+| `"test"` | `trainer.test()` | 載入測試資料集 |
+| `"predict"` | `trainer.predict()` | 載入預測資料集 |
+
+```python
+def setup(self, stage: str):
+    if stage == "fit":
+        # 訓練和驗證資料
+        self.train_ds = MyDataset(root=self.data_dir, split="train")
+        self.val_ds = MyDataset(root=self.data_dir, split="val")
+    
+    elif stage == "test":
+        # 測試資料
+        self.test_ds = MyDataset(root=self.data_dir, split="test")
+    
+    elif stage == "predict":
+        # 用於預測的無標籤資料
+        self.predict_ds = MyDataset(root=self.data_dir, split="predict")
+```
+
+:::tip[延遲載入 (Lazy Loading)]
+為了提高效率，請在 `setup()` 內部而不是 `__init__()` 中載入資料。`setup()` 會在進行訓練的設備上被呼叫，因此資料會在需要的地方被載入。
+:::
+
+## DataLoader 方法
+
+| 方法 | 階段 | 描述 |
+| :--- | :--- | :--- |
+| `train_dataloader` | Fit/Validate | 返回訓練 DataLoader |
+| `val_dataloader` | Fit/Validate | 返回驗證 DataLoader |
+| `test_dataloader` | Test | 返回測試 DataLoader |
+| `predict_dataloader` | Predict | 返回預測 DataLoader |
+
+```python
+def train_dataloader(self):
+    return DataLoader(
+        self.train_ds,
+        batch_size=self.batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        drop_last=True  # 有助於梯度穩定性
+    )
+```
+
+### 多個 DataLoader
+
+返回一個列表以使用多個 DataLoader（例如，用於多模態學習）：
+
+```python
+def train_dataloader(self):
+    return [
+        DataLoader(self.image_ds, batch_size=32, shuffle=True),
+        DataLoader(self.text_ds, batch_size=32, shuffle=True),
+    ]
+```
+
+在 `training_step` 中，存取多個批次（batches）：
+
+```python
+def training_step(self, batch, batch_idx):
+    image_batch, text_batch = batch  # 來自兩個 dataloader
+    # ...
+```
+
+## 與原生 Dataset/DataLoader 的比較
+
+| 方面 | 原生 PyTorch | LightningDataModule |
+| :--- | :--- | :--- |
+| 資料載入 | 在訓練腳本中 | 在專門的類別中 |
+| 可重複使用性 | 在專案之間複製貼上 | 匯入並重複使用 |
+| 設備放置 | 手動 | 自動 (DataLoader 在正確的設備上) |
+| 多 GPU | 手動複製 | 使用 `DistributedSampler` 自動處理 |
+| 切換資料集 | 修改訓練腳本 | 傳入不同的 DataModule |
+
+### 原生 PyTorch
+
+```python
+# 在訓練腳本中
+train_ds = MNISTDataset(root="data/", train=True)
+val_ds = MNISTDataset(root="data/", train=False)
+train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_ds, batch_size=32)
+
+for epoch in range(epochs):
+    for batch in train_loader:
+        # 訓練邏輯
+```
+
+### 使用 DataModule
+
+```python
+# 關注點分離
+class MNISTData(L.LightningDataModule):
+    def setup(self, stage):
+        self.train_ds = MNISTDataset(root="data/", train=True)
+        self.val_ds = MNISTDataset(root="data/", train=False)
+    
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, batch_size=32, shuffle=True)
+    
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, batch_size=32)
+
+# 訓練腳本很乾淨
+trainer = L.Trainer()
+trainer.fit(model, datamodule=MNISTData())
+```
+
+## 完整範例：帶有 Transforms 的 MNIST
+
+```python
+import lightning as L
+import torch
+import torchvision
+from torchvision import transforms
+
+class MNISTData(L.LightningDataModule):
+    def __init__(self, data_dir: str = "data/", batch_size: int = 32):
+        super().__init__()
+        self.save_hyperparameters()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+    
+    def setup(self, stage: str = None):
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
+        
+        if stage == "fit" or stage is None:
+            self.mnist_train = torchvision.datasets.MNIST(
+                root=self.data_dir, train=True, transform=transform, download=True
+            )
+            self.mnist_val = torchvision.datasets.MNIST(
+                root=self.data_dir, train=False, transform=transform, download=True
+            )
+        
+        if stage == "test":
+            self.mnist_test = torchvision.datasets.MNIST(
+                root=self.data_dir, train=False, transform=transform, download=True
+            )
+    
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_train,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_val,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+    
+    def test_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.mnist_test,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4
+        )
+```
+
+## 在 Model 和 DataModule 之間共享資料
+
+使用 `save_hyperparameters()` 並存取設定：
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        # Model 可以存取 DataModule 的超參數
+        # 透過 trainer.datamodule.hparams
+        pass
+```
+
+對於顯式的資料傳遞：
+
+```python
+# 選項 1：直接存取
+trainer = L.Trainer()
+trainer.fit(model, datamodule=data)
+
+# 選項 2：在 training step 中，透過 trainer 存取
+def training_step(self, batch, batch_idx):
+    dm = self.trainer.datamodule
+    # 使用 dm.hparams
+```
+
+:::tip[一致的資料介面]
+無論底層資料來源是什麼，DataModule 都提供了一致的介面。無需更改訓練程式碼即可從 MNIST 切換到 CIFAR-10 再到自訂資料集。
+:::

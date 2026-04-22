@@ -1,0 +1,401 @@
+---
+sidebar_position: 2
+title: Hydra 基礎 (Hydra Basics)
+description: 設定組 (Config groups)、defaults 列表、_target_ 約定和 @hydra.main 裝飾器。
+---
+
+# Hydra 基礎 (Hydra Basics)
+
+Hydra 是一個用於優雅地設定複雜應用程式的框架。它支援設定組合、命令列參數覆寫以及動態實例化。本文件涵蓋了與 Lightning 整合所需的核心 Hydra 概念。
+
+## 核心概念
+
+Hydra 解決了一個基本問題：複雜的應用程式擁有大量以非平凡方式互動的參數。硬編碼這些值會使程式碼缺乏靈活性；而將它們全部作為命令列參數傳遞則會變得極其繁瑣。
+
+Hydra 透過以下方式解決這個問題：
+
+1. **設定檔 (Configuration files)**：在 YAML 檔案中定義參數
+2. **組合 (Composition)**：合併來自多個來源的設定
+3. **覆寫 (Overrides)**：從命令列覆寫參數值
+4. **實例化 (Instantiation)**：從設定字典建立物件
+
+## `defaults` 列表
+
+`defaults` 列表是 Hydra 設定的核心。它指定了要載入的設定檔及其載入順序：
+
+```yaml
+# configs/default.yaml
+defaults:
+  - trainer: default
+  - model: default
+  - datamodule: default
+  - optimizer: adam
+  - scheduler: cosine
+  - _self_  # 允許本機覆寫
+```
+
+每個 default 項目都映射到一個設定檔。`_self_` 關鍵字允許本機檔案中的設定值覆寫組合後的值。
+
+### 載入順序
+
+設定按其在 `defaults` 中出現的順序載入：
+
+1. 第一項最先載入（基礎設定）
+2. 後續項覆寫先前的值
+3. `_self_` 允許本機檔案覆寫之前所有的設定
+
+```yaml
+# configs/trainer/default.yaml
+# 這個檔案最先在 trainer 部分載入
+defaults:
+  - base: gpu
+
+# configs/trainer/base.yaml
+# 基礎訓練器設定
+accelerator: gpu
+devices: 1
+precision: 32
+
+# 載入 defaults 後，實際生效的 trainer 設定：
+# {accelerator: gpu, devices: 1, precision: 32}
+```
+
+## 設定組 (Config Groups)
+
+設定被組織成組（即 `configs/` 內的子目錄）：
+
+```text
+configs/
+├── trainer/
+│   ├── default.yaml
+│   ├── gpu.yaml
+│   └── cpu.yaml
+├── model/
+│   ├── default.yaml
+│   ├── resnet.yaml
+│   └── transformer.yaml
+└── optimizer/
+    ├── adam.yaml
+    └── sgd.yaml
+```
+
+### 存取設定組
+
+使用點號表示法引用設定組：
+
+```bash
+# 載入 configs/trainer/gpu.yaml
+python scripts/train.py trainer=gpu
+
+# 從命令列覆寫 optimizer
+python scripts/train.py optimizer=sgd
+```
+
+設定組名稱對應於子目錄和不帶副檔名的檔案名稱。*(注意：將原程式碼 `python src/train.py` 修正為符合規範的 `python scripts/train.py`)*
+
+## 命令列覆寫
+
+任何設定值都可以透過命令列進行覆寫：
+
+```bash
+# 覆寫單個值
+python scripts/train.py model.lr=1e-4
+
+# 覆寫嵌套值
+python scripts/train.py trainer.max_epochs=100
+
+# 覆寫列表
+python scripts/train.py model.layers=[64,128,256]
+
+# 覆寫多個值
+python scripts/train.py model.lr=1e-4 trainer.max_epochs=50
+```
+
+### 覆寫語法
+
+| 語法 | 描述 |
+| :--- | :--- |
+| `key=value` | 設定值 |
+| `+key=value` | 新增鍵 |
+| `~key` | 刪除鍵 |
+| `key+=value` | 附加到列表 |
+| `key@group` | 使用備選設定 |
+
+## `_target_` 約定
+
+`_target_` 鍵告訴 Hydra 如何實例化一個物件。它指定了完整的類別路徑：
+
+```yaml
+# configs/datamodule/mnist.yaml
+_target_: src.data.MNISTDataModule
+data_dir: ./data
+batch_size: 32
+```
+
+Hydra 解析 `_target_` 以確定要實例化的類別，然後將剩餘的鍵作為參數傳遞：
+
+```python
+from hydra.utils import instantiate
+
+# 這將建立一個 src.data.MNISTDataModule(data_dir="./data", batch_size=32) 的實例
+datamodule = instantiate(cfg.datamodule)
+```
+
+### 範例：DataModule 設定
+
+```yaml
+# configs/datamodule/mnist.yaml
+_target_: src.data.MNISTDataModule
+data_dir: ${data_dir}  # 變數插值
+batch_size: 64
+num_workers: 4
+```
+
+```python
+# src/data/mnist.py
+class MNISTDataModule(LightningDataModule):
+    def __init__(self, data_dir: str, batch_size: int, num_workers: int = 0):
+        super().__init__()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+```
+
+## `_partial_` 約定
+
+當需要延遲實例化時（例如對於工廠模式），使用 `_partial_`：
+
+```yaml
+# 適用於需要接收 model 作為參數的最佳化器
+optimizer:
+  _partial_: torch.optim.Adam
+  lr: 1e-3
+```
+
+```python
+from hydra.utils import instantiate
+
+# 建立一個偏函數（呼叫時返回 Adam，接收 model.parameters() 作為參數）
+optimizer_fn = instantiate(cfg.optimizer)
+
+# 稍後：實例化實際的最佳化器
+optimizer = optimizer_fn(model.parameters())
+```
+
+## `@hydra.main` 裝飾器
+
+`@hydra.main` 裝飾器將設定注入到函數中：
+
+```python
+# scripts/train.py
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # cfg 包含組合後的設定
+    print(OmegaConf.to_yaml(cfg))
+    
+    # 存取設定值
+    lr = cfg.model.lr
+    epochs = cfg.trainer.max_epochs
+    
+    # 實例化元件
+    model = hydra.utils.instantiate(cfg.model)
+```
+
+| 參數 | 描述 |
+| :--- | :--- |
+| `config_path` | configs 目錄的路徑（相對於腳本） |
+| `config_name` | 預設設定檔的名稱（不帶 .yaml） |
+| `version_base` | Hydra 版本（對於 Hydra 1.3+ 使用 `None`） |
+
+### 完整的 train.py 範例
+
+```python
+# scripts/train.py
+import hydra
+from omegaconf import DictConfig
+import lightning as L
+from hydra.utils import instantiate
+
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # 實例化 DataModule
+    datamodule = instantiate(cfg.datamodule)
+    
+    # 實例化 Model
+    model = instantiate(cfg.model)
+    
+    # 建立 Trainer
+    trainer = L.Trainer(**cfg.trainer)
+    
+    # 訓練
+    trainer.fit(model, datamodule=datamodule)
+
+if __name__ == "__main__":
+    main()
+```
+
+## 變數插值
+
+Hydra 支援在設定中進行變數插值：
+
+```yaml
+# configs/default.yaml
+data_dir: ./data
+model_dir: ./models
+
+# 變數插值
+datamodule:
+  _target_: src.data.MNISTDataModule
+  data_dir: ${data_dir}  # 使用 data_dir 的值
+
+model:
+  save_dir: ${model_dir}
+```
+
+插值在執行時解析。你也可以跨設定組進行插值：
+
+```yaml
+# 從另一個組進行插值
+model:
+  _target_: src.models.MyModel
+  save_dir: ${trainer.defaults.model_dir}
+```
+
+## OmegaConf
+
+Hydra 使用 [OmegaConf](https://omegaconf.readthedocs.io/) 進行設定管理。它提供了：
+
+```python
+from omegaconf import OmegaConf, DictConfig
+
+@hydra.main(...)
+def main(cfg: DictConfig):
+    # 轉換為字典
+    cfg_dict = OmegaConf.to_container(cfg)
+    
+    # 透過程式碼進行覆寫
+    OmegaConf.set_struct(cfg, False)
+    cfg.new_key = "value"
+    
+    # 檢查鍵是否存在
+    if "model" in cfg:
+        pass
+```
+
+:::tip[OmegaConf 功能]
+OmegaConf 支援結構化設定（帶有類型提示）、環境變數插值和驗證。對於需要驗證的設定，使用 `OmegaConf.structured()`。
+:::
+
+## 作為輕量級替代方案的 LightningCLI
+
+對於不需要進階設定組合的簡單專案，Lightning 提供了 `LightningCLI` —— 手動設定 Hydra 的內建替代方案：
+
+```python
+from lightning import cli
+
+# 自動提供 CLI 參數解析
+# python train.py --model.lr=1e-4 --trainer.max_epochs=10
+cli.LightningCLI(model_class=MyModel, datamodule_class=MyDataModule)
+```
+
+### LightningCLI vs. 手動 Hydra
+
+| 特性 | LightningCLI | 手動 Hydra |
+| :--- | :--- | :--- |
+| **複雜性** | 低 | 高 |
+| **組合** | 基礎 | 全面 |
+| **靈活性** | 有限 | 無限 |
+| **使用場景** | 簡單專案 | 研究/生產環境 |
+
+```python
+# LightningCLI 自動提供以下功能：
+# - 參數解析
+# - 最佳化器/排程器設定
+# - 檢查點載入
+# - 多 GPU 訓練標誌位
+```
+
+:::note[LightningCLI]
+LightningCLI 非常適合快速原型設計和簡單專案。對於具有許多設定組合的複雜實驗，手動設定 Hydra 能夠提供更多控制。
+:::
+
+## 完整範例：設定檔
+
+### trainer/default.yaml
+
+```yaml
+# configs/trainer/default.yaml
+accelerator: gpu
+devices: 1
+max_epochs: 10
+precision: 32
+accumulate_grad_batches: 1
+gradient_clip_val: 0.0
+```
+
+### model/default.yaml
+
+```yaml
+# configs/model/default.yaml
+_target_: src.models.MyModel
+lr: 1e-3
+hidden_dims: [256, 128]
+dropout: 0.1
+```
+
+### optimizer/adam.yaml
+
+```yaml
+# configs/optimizer/adam.yaml
+_target_: torch.optim.Adam
+lr: 1e-3
+betas: [0.9, 0.999]
+eps: 1e-8
+weight_decay: 0.0
+```
+
+### default.yaml (組合後)
+
+```yaml
+# configs/default.yaml
+defaults:
+  - trainer: default
+  - model: default
+  - optimizer: adam
+
+trainer:
+  max_epochs: 10
+
+# 這部分覆寫了 defaults 中的設定
+model:
+  lr: 1e-4  # 覆寫 optimizer 的預設 lr
+```
+
+## 執行命令
+
+```bash
+# 預設執行
+python scripts/train.py
+
+# 覆寫學習率
+python scripts/train.py model.lr=5e-5
+
+# 使用 SGD 最佳化器
+python scripts/train.py optimizer=sgd
+
+# 除錯模式
+python scripts/train.py +debug=default
+```
+
+:::tip[測試設定]
+使用 `python scripts/train.py --cfg job` 可以查看完整的組合設定而無需實際執行訓練。這對於除錯設定問題非常有價值。
+:::
+
+## 下一步
+
+- [設定組合 (Config Composition)](./config-composition): 進階設定組合模式
+- [實例化 (Instantiation)](./instantiation): 實例化 Lightning 元件
+- [專案結構 (Project Structure)](./project-structure): 整體目錄佈局

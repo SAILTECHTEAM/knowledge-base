@@ -1,0 +1,681 @@
+---
+sidebar_position: 4
+title: Optimizer & Scheduler
+description: The configure_optimizers pattern, single/multiple optimizers, scheduler configuration, and manual optimization.
+---
+
+# 优化器与调度器 (Optimizer & Scheduler)
+
+配置优化器 (optimizers) 和学习率调度器 (learning rate schedulers) 是 Lightning 训练的核心部分。本文档介绍了 `configure_optimizers` 模式、调度器配置，以及高级用例中的手动优化 (manual optimization)。
+
+## configure_optimizers 模式
+
+`configure_optimizers` 方法负责返回优化器和调度器的配置：
+
+```python
+import lightning as L
+import torch
+
+
+class MyModule(L.LightningModule):
+    def __init__(self, lr: float = 1e-3):
+        super().__init__()
+        self.save_hyperparameters()
+        # ...
+    
+    def configure_optimizers(self):
+        # 配置并返回优化器/调度器
+        ...
+```
+
+## 单个优化器
+
+最简单的情况 —— 返回单个优化器：
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    return optimizer
+```
+
+```mermaid
+flowchart TD
+    A[configure_optimizers] --> B[Return Optimizer]
+    B --> C[Trainer uses optimizer]
+    
+```
+
+### 带有权重衰减 (Weight Decay)
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.AdamW(
+        self.parameters(),
+        lr=self.hparams.lr,
+        weight_decay=1e-4,
+    )
+    return optimizer
+```
+
+## 带有调度器的优化器
+
+返回一个包含优化器和调度器的字典：
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=10,
+        eta_min=1e-6,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "monitor": "val_loss",
+            "interval": "epoch",
+            "frequency": 1,
+        },
+    }
+```
+
+### 调度器字典键说明
+
+| 键名 | 描述 |
+| :--- | :--- |
+| `scheduler` | 调度器实例 |
+| `monitor` | 要监控的指标（用于 ReduceLROnPlateau） |
+| `interval` | `"epoch"` 或 `"step"` |
+| `frequency` | 每 N 个 epoch 或 step 运行一次 |
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    
+    # ReduceLROnPlateau 监控一个指标
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=3,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "monitor": "val_loss",  # 监控的指标
+            "interval": "epoch",
+            "frequency": 1,
+        },
+    }
+```
+
+### 间隔与频率 (Interval and Frequency)
+
+```python
+# 基于 step 的调度 (每 100 步更新)
+return {
+    "optimizer": optimizer,
+    "lr_scheduler": {
+        "scheduler": scheduler,
+        "interval": "step",  # "step" 或 "epoch"
+        "frequency": 100,    # 每 N 步
+    },
+}
+```
+
+## 多个优化器
+
+对于多个优化器（例如 GANs），返回一个列表：
+
+```python
+def configure_optimizers(self):
+    # 生成器优化器
+    opt_G = torch.optim.Adam(
+        self.generator.parameters(),
+        lr=1e-3,
+    )
+    
+    # 判别器优化器
+    opt_D = torch.optim.Adam(
+        self.discriminator.parameters(),
+        lr=1e-4,
+    )
+    
+    return [opt_G, opt_D]
+```
+
+### 带有独立调度器
+
+为每个优化器返回一个字典列表：
+
+```python
+def configure_optimizers(self):
+    opt_G = torch.optim.Adam(self.generator.parameters(), lr=1e-3)
+    opt_D = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
+    
+    scheduler_G = torch.optim.lr_scheduler.CosineAnnealingLR(opt_G, T_max=10)
+    scheduler_D = torch.optim.lr_scheduler.CosineAnnealingLR(opt_D, T_max=10)
+    
+    return [
+        {
+            "optimizer": opt_G,
+            "lr_scheduler": {
+                "scheduler": scheduler_G,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        },
+        {
+            "optimizer": opt_D,
+            "lr_scheduler": {
+                "scheduler": scheduler_D,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        },
+    ]
+```
+
+## 替代方案：在 `__init__` 中配置并保存
+
+对于简单情况，可以在 `__init__` 中配置：
+
+```python
+def __init__(self, lr: float = 1e-3):
+    super().__init__()
+    self.save_hyperparameters()
+    self.lr = lr
+    # ...
+
+def configure_optimizers(self):
+    return torch.optim.Adam(self.parameters(), lr=self.lr)
+```
+
+或使用工厂模式 (factory pattern)：
+
+```python
+def configure_optimizers(self):
+    from hydra.utils import instantiate
+    
+    optimizer_conf = self.hparams.get("optimizer", {})
+    optimizer = instantiate(optimizer_conf, self.parameters())
+    
+    scheduler_conf = self.hparams.get("scheduler", {})
+    if scheduler_conf:
+        scheduler = instantiate(scheduler_conf, optimizer)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+    
+    return optimizer
+```
+
+## 通过 Hydra 配置进行实例化
+
+### 优化器配置
+
+```yaml
+# configs/optimizer/adam.yaml
+_target_: torch.optim.Adam
+lr: 1e-3
+betas: [0.9, 0.999]
+eps: 1e-8
+weight_decay: 0.0
+```
+
+### 调度器配置
+
+```yaml
+# configs/scheduler/cosine.yaml
+_target_: torch.optim.lr_scheduler.CosineAnnealingLR
+T_max: 100
+eta_min: 1e-6
+```
+
+### 使用配置的 Module
+
+```python
+def configure_optimizers(self):
+    # 实例化优化器
+    optimizer = instantiate(
+        self.cfg.optimizer,
+        self.parameters(),
+    )
+    
+    # 实例化调度器
+    scheduler = instantiate(
+        self.cfg.scheduler,
+        optimizer,
+        T_max=self.cfg.trainer.max_epochs,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "monitor": "val_loss",
+            "interval": "epoch",
+            "frequency": 1,
+        },
+    }
+```
+
+### 完整配置示例
+
+```yaml
+# configs/optimizer.yaml
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 1e-3
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  T_max: 100
+  eta_min: 1e-6
+```
+
+## 常见调度器模式
+
+### ReduceLROnPlateau
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=3,
+        verbose=True,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "monitor": "val_loss",
+            "interval": "epoch",
+            "frequency": 1,
+        },
+    }
+```
+
+### Cosine Annealing
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=10,
+        eta_min=1e-6,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "interval": "epoch",
+            "frequency": 1,
+        },
+    }
+```
+
+### OneCycleLR
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    
+    # OneCycleLR 在内部使用调度器步进
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=self.hparams.lr,
+        epochs=10,
+        steps_per_epoch=100,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "interval": "step",
+            "frequency": 1,
+        },
+    }
+```
+
+### StepLR
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer,
+        step_size=10,
+        gamma=0.1,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "interval": "epoch",
+            "frequency": 1,
+        },
+    }
+```
+
+### Warmup + Cosine
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+    
+    # 先预热 (Warmup)，再做余弦退火
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=0.1,
+                end_factor=1.0,
+                total_iters=5,
+            ),
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=95,
+                eta_min=1e-6,
+            ),
+        ],
+        milestones=[5],
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "interval": "epoch",
+            "frequency": 1,
+        },
+    }
+```
+
+## 手动优化 (Manual Optimization)
+
+手动优化让你可以完全控制训练循环。通常用于：
+
+- 梯度累积
+- 多个优化器步骤
+- 自定义梯度裁剪
+- GAN 训练
+
+### 启用手动优化
+
+```python
+def training_step(self, batch, batch_idx):
+    # 直接返回 loss 而不自动推进优化器
+    return loss
+
+# Lightning 将不会自动调用 optimizer.step()
+```
+
+### 访问优化器
+
+```python
+def on_train_batch_end(self, outputs):
+    optimizer = self.optimizers()
+    optimizer.step()
+    optimizer.zero_grad()
+    return outputs
+```
+
+### 使用梯度累积
+
+```python
+def __init__(self):
+    super().__init__()
+    self.automatic_optimization = False
+
+def training_step(self, batch, batch_idx):
+    # 反向传播
+    loss = self.compute_loss(batch)
+    self.manual_backward(loss)
+    
+    # 累积梯度
+    if (batch_idx + 1) % self.accumulate_grad_batches == 0:
+        # 梯度裁剪
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+        
+        # 优化器步进
+        opt = self.optimizers()
+        opt.step()
+        opt.zero_grad()
+    
+    return loss
+```
+
+### 自定义调度
+
+```python
+def __init__(self):
+    super().__init__()
+    self.automatic_optimization = False
+
+def training_step(self, batch, batch_idx):
+    opt = self.optimizers()
+    
+    # 自定义优化器逻辑
+    loss = self.compute_loss(batch)
+    self.manual_backward(loss)
+    
+    # 自定义梯度裁剪
+    torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+    
+    # 自定义调度：每 N 个 batch 更新学习率
+    if self.global_step % 100 == 0:
+        for param_group in opt.param_groups:
+            param_group["lr"] *= 0.99
+    
+    opt.step()
+    opt.zero_grad()
+    
+    return loss
+```
+
+### 高级示例：GAN
+
+```python
+def __init__(self, lr_g: float = 1e-3, lr_d: float = 1e-4):
+    super().__init__()
+    self.save_hyperparameters()
+    self.automatic_optimization = False
+    self.generator = Generator()
+    self.discriminator = Discriminator()
+
+def training_step(self, batch, batch_idx):
+    real, _ = batch
+    
+    # 训练判别器
+    opt_d = self.optimizers()[0]
+    opt_d.zero_grad()
+    
+    fake = self.generator(self.get_noise(real.size(0)))
+    fake_detached = fake.detach()
+    
+    loss_d_real = self.adversarial_loss(self.discriminator(real), True)
+    loss_d_fake = self.adversarial_loss(self.discriminator(fake_detached), False)
+    loss_d = (loss_d_real + loss_d_fake) / 2
+    
+    self.manual_backward(loss_d)
+    opt_d.step()
+    
+    # 训练生成器
+    opt_g = self.optimizers()[1]
+    opt_g.zero_grad()
+    
+    fake = self.generator(self.get_noise(real.size(0)))
+    loss_g = self.adversarial_loss(self.discriminator(fake), True)
+    
+    self.manual_backward(loss_g)
+    opt_g.step()
+    
+    return {"loss_d": loss_d, "loss_g": loss_g}
+
+def configure_optimizers(self):
+    opt_g = torch.optim.Adam(self.generator.parameters(), lr=self.hparams.lr_g)
+    opt_d = torch.optim.Adam(self.discriminator.parameters(), lr=self.hparams.lr_d)
+    return [opt_g, opt_d]
+```
+
+## 调度器字典参考 (Scheduler Dict Reference)
+
+```mermaid
+flowchart TD
+    A[Return Dict] --> B[Keys]
+    B --> C[optimizer]
+    B --> D[lr_scheduler]
+    
+    D --> E[scheduler]
+    D --> F[monitor]
+    D --> G[interval]
+    D --> H[frequency]
+    
+    E --> I[ReduceLROnPlateau]
+    E --> J[CosineAnnealing]
+    E --> K[StepLR]
+    E --> L[OneCycleLR]
+    
+```
+
+### 必需项与可选项
+
+| 键名 | 是否必需 | 描述 |
+| :--- | :--- | :--- |
+| `optimizer` | 是 | 优化器实例 |
+| `lr_scheduler` | 否 | 调度器字典 |
+
+### 调度器字典字段 (如果提供)
+
+| 键名 | 是否必需 | 描述 |
+| :--- | :--- | :--- |
+| `scheduler` | 是 | 调度器实例 |
+| `monitor` | 用于 ReduceLROnPlateau 时 | 要监控的指标 |
+| `interval` | 否 | `"epoch"` 或 `"step"` |
+| `frequency` | 否 | 运行频率 |
+
+## 完整示例
+
+```python
+import lightning as L
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class ClassificationModule(L.LightningModule):
+    def __init__(self, lr: float = 1e-3):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.layer = nn.Linear(784, 10)
+        self.lr = lr
+    
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        return self.layer(x)
+    
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        
+        loss = F.cross_entropy(logits, y)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        
+        loss = F.cross_entropy(logits, y)
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == y).float().mean()
+        
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+    
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.lr,
+            weight_decay=1e-4,
+        )
+        
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=10,
+            eta_min=1e-6,
+        )
+        
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss",
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
+```
+
+## 最佳实践
+
+### 从简单开始
+
+```python
+# 默认情况：单个优化器
+def configure_optimizers(self):
+    return torch.optim.Adam(self.parameters(), lr=1e-3)
+```
+
+### 在需要时添加调度器
+
+```python
+# 在验证基础训练可以工作后再添加调度器
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+    
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=10,
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "interval": "epoch",
+        },
+    }
+```
+
+### 谨慎使用手动优化
+
+:::caution[手动优化]
+仅在绝对必要时 (如 GANs，复杂的梯度操作) 使用手动优化。它绕过了 Lightning 的自动化处理机制，并可能导致在分布式训练中出现问题。
+:::
+
+## 下一步
+
+- [Logging Metrics](../core-components/logging-metrics): 日志和指标记录
+- [Custom Callbacks](./custom-callbacks): 编写自定义回调
+- [Instantiation](../hydra-integration/instantiation): 从配置实例化组件

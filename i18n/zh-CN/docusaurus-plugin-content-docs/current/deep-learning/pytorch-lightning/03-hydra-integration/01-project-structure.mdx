@@ -1,0 +1,240 @@
+---
+sidebar_position: 1
+title: 项目结构 (Project Structure)
+description: Lightning + Hydra 项目的目录布局、入口点和组织方式。
+---
+
+# 项目结构 (Project Structure)
+
+一个组织良好的项目结构对于可复现的机器学习实验至关重要。本文档概述了基于 [Lightning-Hydra Template](https://github.com/ashleve/lightning-hydra-template) 的推荐目录布局，这是 PyTorch Lightning + Hydra 项目的规范脚手架。
+
+:::note[模板参考]
+本页面文档使用 [Lightning-Hydra Template](https://github.com/ashleve/lightning-hydra-template) 作为规范参考。此处展示的结构反映了使用 Lightning 和 Hydra 进行 ML 实验的既定最佳实践。
+:::
+
+## 目录布局
+
+```text
+project/
+├── .github/                  # CI/CD 的 GitHub Actions 工作流
+├── configs/                 # Hydra 配置文件
+│   ├── callbacks/          # 回调函数 (Callback) 配置
+│   ├── datamodule/         # 数据模块 (DataModule) 配置
+│   ├── debug/             # 调试专用配置
+│   ├── experiment/        # 实验配置
+│   ├── logger/           # 日志记录器 (Logger) 配置
+│   ├── model/             # 模型配置
+│   ├── module/           # LightningModule 配置
+│   ├── optimizer/         # 优化器配置
+│   ├── scheduler/        # 学习率调度器配置
+│   ├── trainer/          # 训练器 (Trainer) 配置
+│   ├── default.yaml      # 默认配置
+│   └── hydra/            # Hydra 内部设置
+├── data/                   # 数据文件
+├── logs/                   # 日志输出 (tensorboard, wandb 等)
+├── models/                 # 保存的模型权重文件 (checkpoints)
+├── scripts/                # 独立的训练/评估脚本
+│   ├── eval.py            # 评估脚本
+│   ├── export.py          # 模型导出脚本
+│   └── train.py           # 主训练脚本
+├── src/                    # 源代码
+│   ├── data/              # 数据加载模块
+│   ├── models/            # 模型定义
+│   ├── utils/             # 工具函数
+│   └── __init__.py
+├── tests/                  # 单元测试
+├── README.md
+├── requirements.txt
+└── setup.py
+```
+
+## 各目录用途
+
+### `configs/`
+
+`configs/` 目录包含所有 Hydra 配置文件。这是定义实验参数的地方：
+
+| 子目录 | 用途 |
+| :--- | :--- |
+| `callbacks/` | 自定义回调函数配置 |
+| `datamodule/` | DataModule 类和数据集设置 |
+| `model/` | 模型架构参数 |
+| `module/` | LightningModule 类和训练逻辑 |
+| `optimizer/` | 优化器设置 |
+| `scheduler/` | 学习率调度器设置 |
+| `trainer/` | Trainer 标志位（设备、加速器等） |
+| `logger/` | 日志记录后端配置 |
+| `experiment/` | 完整的实验配置 |
+| `debug/` | 调试专用的覆盖配置 |
+
+### `src/`
+
+`src/` 目录包含核心 Python 模块：
+
+| 子目录 | 用途 |
+| :--- | :--- |
+| `data/` | 数据加载和处理逻辑 |
+| `models/` | 模型架构 |
+| `utils/` | 辅助工具（实例化、日志设置） |
+
+### `scripts/`
+
+`scripts/` 目录包含入口点脚本：
+
+| 脚本 | 用途 |
+| :--- | :--- |
+| `train.py` | 主训练入口 |
+| `eval.py` | 基于已保存权重的评估 |
+| `export.py` | 导出模型用于推理 |
+
+## 入口点
+
+### train.py
+
+主训练脚本使用 `@hydra.main` 装饰器来启用配置管理：
+
+```python
+# scripts/train.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # 从配置实例化组件
+    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.datamodule)
+    model: LightningModule = hydra.utils.instantiate(cfg.module)
+    
+    # 配置回调函数和日志记录器
+    callbacks = instantiate_callbacks(cfg.get("callbacks", {}))
+    loggers = instantiate_loggers(cfg.get("logger", {}))
+    
+    # 创建训练器
+    trainer = Trainer(
+        **cfg.trainer,
+        callbacks=callbacks,
+        logger=loggers,
+    )
+    
+    # 开始训练
+    trainer.fit(model, datamodule=datamodule)
+
+if __name__ == "__main__":
+    main()
+```
+
+运行训练：
+
+```bash
+python scripts/train.py
+# 或使用参数覆盖
+python scripts/train.py model.lr=1e-4 trainer.max_epochs=100
+```
+*(注意：这里将英文版中错误的 `python src/train.py` 修正为 `python scripts/train.py`)*
+
+### eval.py
+
+评估脚本加载权重并运行推理：
+
+```python
+# scripts/eval.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    # 加载权重
+    model = LitModel.load_from_checkpoint(cfg.ckpt_path)
+    
+    # 运行评估
+    trainer = Trainer(accelerator="cpu")
+    trainer.test(model)
+```
+
+### export.py
+
+导出脚本将模型权重转换为部署格式：
+
+```python
+# scripts/export.py
+@hydra.main(version_base=None, config_path="../configs", config_name="default")
+def main(cfg: DictConfig):
+    model = LitModel.load_from_checkpoint(cfg.ckpt_path)
+    
+    # 导出到 ONNX/TorchScript
+    model.to_onnx(cfg.export_path)
+```
+
+## 为什么这种结构很重要
+
+### 可复现性
+
+每个实验配置都存储为 YAML 文件。一个完整的实验可以通过以下方式复现：
+
+1. 检出特定 commit 的代码
+2. 使用相同的配置文件
+3. 运行相同的命令
+
+### 配置组合
+
+该结构通过 Hydra 的 `defaults` 列表实现配置的组合：
+
+```yaml
+# configs/experiment/my_experiment.yaml
+defaults:
+  - model: my_model
+  - datamodule: my_data
+  - optimizer: adam
+  - scheduler: cosine
+  - trainer: gpu
+```
+
+### 团队协作
+
+一致的结构意味着任何团队成员都能立即在一个陌生的项目中导航。关于在哪里找到配置、模型代码或数据加载逻辑不再有任何歧义。
+
+### 实验追踪
+
+将配置与代码分离，使日志框架能够追踪实验之间发生的变化。配置文件本身也成为了实验参数的记录。
+
+## 默认配置
+
+默认配置将所有内容连接在一起：
+
+```yaml
+# configs/default.yaml
+defaults:
+  - trainer: default
+  - model: default
+  - datamodule: default
+  - optimizer: adam
+  - scheduler: cosine
+  - callbacks: default
+  - logger: tensorboard
+
+# 覆盖特定参数
+trainer:
+  max_epochs: 10
+
+model:
+  lr: 1e-3
+```
+
+## 使用自定义配置运行
+
+```bash
+# 使用默认配置
+python scripts/train.py
+
+# 从命令行覆盖
+python scripts/train.py trainer.max_epochs=100 model.lr=1e-4
+
+# 使用特定的实验配置
+python scripts/train.py +experiment=my_experiment
+
+# 调试模式 (快速开发运行)
+python scripts/train.py +debug=default
+```
+
+:::tip[目录组织]
+保持每个配置文件专注于单一关注点。模块化配置（如 model, optimizer, datamodule）可以组合在一起，而 experiment 配置则结合这些模块化片段。
+:::
+
+## 下一步
+
+- [Hydra 基础 (Hydra Basics)](./hydra-basics): 学习 Hydra 的基本概念
+- [配置组合 (Config Composition)](./config-composition): 组合复杂的实验
+- [实例化 (Instantiation)](./instantiation): 从配置中实例化组件

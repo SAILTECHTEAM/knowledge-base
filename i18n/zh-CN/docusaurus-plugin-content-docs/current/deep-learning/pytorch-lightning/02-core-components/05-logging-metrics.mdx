@@ -1,0 +1,390 @@
+---
+sidebar_position: 5
+title: Logging and Metrics
+description: 深入了解 Lightning 的日志记录系统和指标集成。
+---
+
+# 日志与指标 (Logging and Metrics)
+
+Lightning 通过 `self.log()` 提供了一个统一的日志记录接口，它可以与多个后端集成。指标会自动在每个 step 跟踪并在每个 epoch 进行汇总。
+
+## self.log 方法
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        loss = self(x, y)
+        
+        # 基本日志记录
+        self.log("train_loss", loss)
+        
+        return loss
+```
+
+### 日志记录参数
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    loss = self(x, y)
+    
+    self.log(
+        name="train_loss",     # 指标名称
+        value=loss,          # 指标值
+        on_step=False,      # 是否在每个 step 记录
+        on_epoch=True,     # 是否在 epoch 结束时汇总
+        prog_bar=False,    # 是否显示在进度条上
+        logger=True,      # 是否记录到 logger
+        reduce_fx=torch.mean  # 跨设备/epoch 归约方式 (默认: mean)
+    )
+```
+
+| 参数 | 描述 | 常见值 |
+| :--- | :--- | :--- |
+| `name` | 指标名称 | `"train_loss"`, `"val_acc"` |
+| `value` | 指标值 | Float tensor 或数字 |
+| `on_step` | 每个 batch 记录一次 | `True`/`False` |
+| `on_epoch` | 在 epoch 结束时汇总 | `True` (默认) |
+| `prog_bar` | 显示在进度条上 | `True`/`False` |
+| `logger` | 记录到 logger | `True` (默认) |
+| `reduce_fx` | 跨设备归约方式 | `torch.mean` (默认) |
+
+### Step 与 Epoch 日志记录
+
+```python
+def training_step(self, batch, batch_idx):
+    loss = self.compute_loss(batch)
+    
+    # 记录每个 step (详细，适合调试)
+    self.log("train_loss_step", loss, on_step=True, on_epoch=False)
+    
+    # 记录 epoch 级别 (自动汇总)
+    self.log("train_loss", loss, on_step=False, on_epoch=True)
+    
+    return loss
+```
+
+| 配置 | 行为 |
+| :--- | --- |
+| `on_step=True, on_epoch=False` | 记录每个 batch |
+| `on_step=False, on_epoch=True` | 记录 epoch 平均值 |
+| `on_step=True, on_epoch=True` | 同时记录 step 和 epoch |
+
+:::tip[进度条]
+将 `prog_bar=True` 用于关键指标，以直观地监控训练。避免过度使用——指标太多会拖慢进度条。
+:::
+
+## log_dict
+
+一次记录多个指标：
+
+```python
+def validation_step(self, batch, batch_idx):
+    x, y = batch
+    preds = self(x)
+    loss = F.cross_entropy(preds, y)
+    
+    preds_idx = torch.argmax(preds, dim=1)
+    acc = (preds_idx == y).float().mean()
+    
+    # 多个指标
+    self.log_dict({
+        "val_loss": loss,
+        "val_acc": acc,
+    }, on_step=False, on_epoch=True)
+    
+    return loss
+```
+
+## 支持的日志记录器 (Loggers)
+
+### TensorBoard (默认)
+
+```python
+from lightning import loggers
+
+trainer = L.Trainer(
+    logger=loggers.TensorBoardLogger("logs/")
+)
+```
+
+```python
+# 写入 logs/tensorboard/
+# 查看方式: tensorboard --logdir=logs
+```
+
+### CSV 日志记录器
+
+```python
+trainer = L.Trainer(
+    logger=loggers.CSVLogger("logs/csv/")
+)
+```
+
+### Weights & Biases
+
+```python
+trainer = L.Trainer(
+    logger=loggers.WandbLogger(
+        project="my-project",
+        entity="my-team",
+        name="experiment-001"
+    )
+)
+```
+
+### 多个日志记录器
+
+```python
+trainer = L.Trainer(
+    logger=[
+        loggers.TensorBoardLogger("logs/tb/"),
+        loggers.CSVLogger("logs/csv/"),
+        loggers.WandbLogger(project="my-project"),
+    ]
+)
+```
+
+### 自定义日志记录器
+
+```python
+from lightning.loggers import Logger
+
+class MyLogger(Logger):
+    @property
+    def name(self):
+        return "my_logger"
+    
+    @property
+    def version(self):
+        return "v1"
+    
+    def log_hyperparams(self, params):
+        pass
+    
+    def log_metrics(self, metrics, step):
+        # 自定义日志记录
+        print(f"Step {step}: {metrics}")
+```
+
+## 指标集成
+
+### 使用 TorchMetrics
+
+Lightning 与 `torchmetrics` 集成以提供标准化的指标：
+
+```python
+import torchmetrics
+
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=10)
+        self.f1 = torchmetrics.F1Score(task="multiclass", num_classes=10)
+    
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        preds = self.model(x)
+        
+        # 直接更新指标
+        self.accuracy(preds, y)
+        self.f1(preds, y)
+        
+        # 直接记录指标对象
+        self.log("val_acc", self.accuracy, on_epoch=True)
+        self.log("val_f1", self.f1, on_epoch=True)
+        
+        return F.cross_entropy(preds, y)
+```
+
+:::tip[自动指标计算与重置]
+当你直接使用 `self.log()` 记录一个 `torchmetrics.Metric` 对象时，Lightning 会自动在 epoch 结束时调用 `.compute()`，并在下一个 epoch 开始时调用 `.reset()`。你不需要为此手动实现 `on_validation_epoch_end`。
+:::
+
+## 常见的日志记录模式
+
+### 仅记录损失
+
+```python
+def training_step(self, batch, batch_idx):
+    loss = self.compute_loss(batch)
+    
+    self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+    
+    return loss
+```
+
+### 记录损失和准确率
+
+```python
+def validation_step(self, batch, batch_idx):
+    x, y = batch
+    preds = self(x)
+    
+    loss = F.cross_entropy(preds, y)
+    preds_class = torch.argmax(preds, dim=1)
+    acc = (preds_class == y).float().mean()
+    
+    self.log_dict({
+        "val_loss": loss,
+        "val_acc": acc,
+    }, on_step=False, on_epoch=True, prog_bar=True)
+    
+    return loss
+```
+
+### 记录自定义指标
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    output = self(x)
+    
+    # 自定义指标：平均预测置信度
+    probs = F.softmax(output, dim=1)
+    confidence = probs.max(dim=1)[0].mean()
+    
+    self.log("train_confidence", confidence, on_step=True)
+    
+    return F.cross_entropy(output, y)
+```
+
+## 在不同阶段的日志记录
+
+### 训练 (Training)
+
+```python
+def training_step(self, batch, batch_idx):
+    loss = self.compute_loss(batch)
+    
+    # Step 级别的日志记录
+    self.log("train_loss", loss, on_step=True, on_epoch=True)
+    
+    return loss
+```
+
+### 验证 (Validation)
+
+```python
+def validation_step(self, batch, batch_idx):
+    loss = self.compute_loss(batch)
+    self.log("val_loss", loss, on_step=False, on_epoch=True)
+    
+    return loss
+```
+
+### 测试 (Test)
+
+```python
+def test_step(self, batch, batch_idx):
+    loss = self.compute_loss(batch)
+    self.log("test_loss", loss, on_step=False, on_epoch=True)
+    
+    return loss
+```
+
+## 访问已记录的指标
+
+### 从回调 (Callback) 中访问
+
+```python
+class MetricPrinter(Callback):
+    def on_validation_epoch_end(self, trainer, pl_module):
+        metrics = trainer.callback_metrics
+        print(metrics)
+```
+
+### 从 Trainer 中访问
+
+```python
+trainer = L.Trainer()
+trainer.fit(model)
+
+# 访问指标
+metrics = trainer.callback_metrics
+print(metrics["train_loss"])
+```
+
+## 日志记录配置
+
+```python
+trainer = L.Trainer(
+    # 每 N 个 step 记录一次
+    log_every_n_steps=10,
+    
+    # 每 N 个 step 将日志刷新到磁盘
+    flush_logs_every_n_steps=100,
+)
+```
+
+## 示例：完整的日志记录设置
+
+```python
+import lightning as L
+import torch
+import torchmetrics
+import torch.nn.functional as F
+
+class LitModel(L.LightningModule):
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.model = torch.nn.Linear(784, num_classes)
+        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
+    
+    def forward(self, x):
+        return self.model(x.view(x.size(0), -1))
+    
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
+    
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        
+        self.log(
+            "train_loss", loss,
+            on_step=True, on_epoch=True,
+            prog_bar=True, logger=True
+        )
+        
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        
+        self.accuracy(logits, y)
+        
+        self.log_dict({
+            "val_loss": loss,
+            "val_acc": self.accuracy,
+        }, on_step=False, on_epoch=True, prog_bar=True)
+        
+        return loss
+```
+
+```python
+trainer = L.Trainer(
+    logger=loggers.TensorBoardLogger("logs/"),
+    log_every_n_steps=50,
+)
+
+trainer.fit(model, datamodule=datamodule)
+```
+
+## 比较：在原生 PyTorch 中的日志记录
+
+| 方面 | 原生 PyTorch | Lightning |
+| :--- | :--- | :--- |
+| 日志记录 | 每个 step 手动处理 | `self.log()` |
+| 汇总 (Aggregation) | 手动平均 | 自动处理 |
+| 多个日志记录器 | 多个库 | `logger=[...]` |
+| 进度条 | 使用 `tqdm` 手动处理 | `prog_bar=True` |
+| 指标重置 | 手动处理 | `on_epoch_end` 或自动 |
+
+:::tip[一致的日志记录]
+始终使用 `self.log()`。避免混合使用手动日志记录——这会破坏监控指标的检查点回调的集成。
+:::

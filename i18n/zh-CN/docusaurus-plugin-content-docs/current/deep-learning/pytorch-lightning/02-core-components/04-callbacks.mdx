@@ -1,0 +1,282 @@
+---
+sidebar_position: 4
+title: Callbacks
+description: 深入了解 Lightning 回调 (Callback) 系统以实现可扩展性和自定义。
+---
+
+# 回调 (Callbacks)
+
+回调 (Callbacks) 是 Lightning 中的可扩展性系统。它们允许你在训练生命周期的特定时间点注入自定义逻辑，而无需修改模型代码。
+
+## 为什么需要回调
+
+在原生 PyTorch 中，你要么修改训练循环，要么以命令式的方式插入代码：
+
+```python
+# 原生 PyTorch：修改训练循环
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        # 训练步骤
+        loss.backward()
+        
+        # 自定义逻辑：每 1000 步保存一次检查点
+        if global_step % 1000 == 0:
+            save_checkpoint()
+        
+        # 自定义逻辑：记录到 wandb
+        wandb.log({"loss": loss})
+        
+        # 自定义逻辑：早停 (early stopping)
+        if val_loss < best_loss:
+            best_loss = val_loss
+        elif val_loss > best_loss + patience:
+            break
+```
+
+Lightning 将这些功能转移到了回调中：
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        ModelCheckpoint(...),   # 自动保存
+        EarlyStopping(...),     # 自动停止
+        LearningRateMonitor(), # 跟踪学习率
+    ]
+)
+```
+
+## 回调结构
+
+```python
+import lightning as L
+from lightning.callbacks import Callback
+
+class MyCallback(Callback):
+    def on_train_start(self, trainer, pl_module):
+        """在训练开始时调用。"""
+        pass
+    
+    def on_train_epoch_start(self, trainer, pl_module):
+        """在每个 epoch 开始时调用。"""
+        pass
+    
+    def on_train_batch_start(
+        self, trainer, pl_module, batch, batch_idx
+    ):
+        """在处理批次之前调用。"""
+        pass
+    
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx
+    ):
+        """在处理批次之后调用。"""
+        pass
+    
+    def on_validation_epoch_end(
+        self, trainer, pl_module, logs
+    ):
+        """在验证结束时调用。"""
+        pass
+    
+    def on_train_end(self, trainer, pl_module):
+        """在训练结束时调用。"""
+        pass
+```
+
+## 回调钩子 (Hooks) 参考
+
+### 训练生命周期钩子
+
+| 钩子 (Hook) | 调用时机 |
+| :--- | :--- |
+| `on_fit_start` | 在训练开始前 |
+| `on_fit_end` | 在训练结束后 |
+| `on_pretune_routine_start` | 在调整 (tuning) 开始前 |
+
+### Epoch 钩子
+
+| 钩子 (Hook) | 调用时机 |
+| :--- | :--- |
+| `on_train_epoch_start` | 在 epoch 开始前 |
+| `on_train_epoch_end` | 在 epoch 结束后 |
+| `on_validation_epoch_start` | 在验证开始前 |
+| `on_validation_epoch_end` | 在验证结束后 |
+
+### Batch 钩子
+
+| 钩子 (Hook) | 调用时机 |
+| :--- | :--- |
+| `on_train_batch_start` | 在批次处理前 |
+| `on_train_batch_end` | 在批次处理后 |
+| `on_validation_batch_start` | 在验证批次前 |
+| `on_validation_batch_end` | 在验证批次后 |
+
+### 其他钩子
+
+| 钩子 (Hook) | 调用时机 |
+| :--- | :--- |
+| `on_save_checkpoint` | 在保存检查点前 |
+| `on_load_checkpoint` | 在加载检查点后 |
+| `on_exception` | 在引发异常时 |
+
+## 内置回调
+
+### ModelCheckpoint
+
+根据监控的指标保存模型权重：
+
+```python
+from lightning import callbacks
+
+checkpoint = callbacks.ModelCheckpoint(
+    dirpath="checkpoints/",
+    filename="{epoch}-{val_loss:.2f}",
+    monitor="val_loss",
+    mode="min",           # "min" 或 "max"
+    save_top_k=3,         # 保留最好的 3 个模型
+    save_last=True,       # 总是保存 "last.ckpt"
+    auto_insert_metric_name=False,
+    every_n_epochs=1,     # 每 N 个 epoch 保存一次
+    train_time_interval="1ep"  # 或者 "1step", "epoch"
+)
+```
+
+| 参数 | 描述 |
+| :--- | :--- |
+| `monitor` | 要监控的指标 |
+| `mode` | 对于损失使用 `"min"` (越低越好)，对于准确率使用 `"max"` |
+| `save_top_k` | 要保留的最好模型的数量 |
+| `save_last` | 总是保存最近的模型 |
+
+### EarlyStopping
+
+当指标停止改善时停止训练：
+
+```python
+early_stop = callbacks.EarlyStopping(
+    monitor="val_loss",
+    mode="min",
+    patience=5,           # 在没有改善的情况下 5 个 epoch 后停止
+    min_delta=0.001,     # 算作改善的最小变化
+    verbose=True,
+    stopping_threshold=0.1,  # 如果低于此值则立即停止
+    check_on_train_epoch_end=False,  # 在 epoch 结束时检查 (而不是 batch)
+)
+```
+
+### LearningRateMonitor
+
+将学习率记录到所有日志记录器：
+
+```python
+lr_monitor = callbacks.LearningRateMonitor(
+    logging="interval",  # "interval" 或 "epoch"
+    interval="step",    # 每个 "step" 或 "epoch" 更新
+    log_momentum=True,  # 如果使用调度器，则记录动量 (momentum)
+)
+```
+
+### ProgressBar
+
+控制进度条：
+
+```python
+progress_bar = callbacks.ProgressBar(
+    refresh_rate=1,     # 每 N 个批次更新一次 (0 = 禁用)
+    process_position=0, # 在多 GPU 中的位置
+)
+```
+
+### ModelSummary
+
+将模型摘要添加到日志记录器：
+
+```python
+model_summary = callbacks.ModelSummary(
+    max_depth=2         # 摘要的深度
+)
+```
+
+## 执行顺序
+
+回调按照它们传递给 Trainer 的顺序执行：
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        LearningRateMonitor(),     # 第一
+        ModelCheckpoint(...),    # 第二
+        EarlyStopping(...),       # 第三
+    ]
+)
+```
+
+在单一钩子类型 (例如 `on_train_batch_start`) 内部，回调按照此顺序执行。
+
+:::caution[执行顺序]
+在多 GPU 训练中，执行顺序取决于策略。使用 `"ddp"` 时，回调仅在主进程上执行。
+:::
+
+## 自定义回调示例
+
+```python
+import lightning as L
+
+class CustomMetricTracker(Callback):
+    def __init__(self):
+        self.best_loss = float("inf")
+    
+    def on_train_start(self, trainer, pl_module):
+        print("训练开始！")
+    
+    def on_validation_epoch_end(self, trainer, pl_module, logs):
+        val_loss = logs.get("val_loss")
+        
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            print(f"新的最佳损失: {val_loss:.4f}")
+        
+        # 如果损失爆炸，则强制停止
+        if val_loss > self.best_loss * 10:
+            print("损失爆炸！正在停止。")
+            trainer.should_stop = True
+    
+    def on_train_end(self, trainer, pl_module):
+        print(f"训练完成。最佳损失: {self.best_loss:.4f}")
+```
+
+## 使用多个回调
+
+```python
+trainer = L.Trainer(
+    callbacks=[
+        callbacks.ModelCheckpoint(
+            monitor="val_loss",
+            save_top_k=3,
+            every_n_epochs=2
+        ),
+        callbacks.EarlyStopping(
+            monitor="val_loss",
+            patience=10,
+        ),
+        callbacks.LearningRateMonitor(
+            interval="epoch"
+        ),
+        MyCustomCallback(),
+    ]
+)
+```
+
+## 比较
+
+| 方面 | 原生 PyTorch | Lightning |
+| :--- | :--- | :--- |
+| 检查点 | 手动保存/加载 | `ModelCheckpoint` |
+| 早停 | 手动检查 + break | `EarlyStopping` |
+| 学习率监控 | 手动记录 | `LearningRateMonitor` |
+| 自定义逻辑 | 修改循环 | 添加回调 |
+| 可重用性 | 复制粘贴 | 导入并使用 |
+
+:::tip[组合回调]
+为你的团队的常见模式 (例如，梯度监控、异常值检测、自定义指标跟踪) 构建一个自定义回调库。
+:::

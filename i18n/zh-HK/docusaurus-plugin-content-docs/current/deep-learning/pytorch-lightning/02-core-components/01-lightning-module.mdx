@@ -1,0 +1,298 @@
+---
+sidebar_position: 1
+title: LightningModule
+description: 深入了解 LightningModule 類別及其生命週期鉤子（Lifecycle Hooks）。
+---
+
+# LightningModule
+
+`LightningModule` 是封裝您的模型的核心抽象。它將 `nn.Module` 與 Lightning 在訓練、驗證、測試和預測期間呼叫的生命週期鉤子（Lifecycle Hooks）結合在一起。
+
+每一個 Lightning 訓練腳本都始於一個繼承自 `LightningModule` 的類別。
+
+## 基本結構
+
+```python
+import lightning as L
+import torch
+import torch.nn as nn
+
+class MyModel(L.LightningModule):
+    def __init__(self, learning_rate: float = 1e-3):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.encoder = nn.Sequential(
+            nn.Linear(28 * 28, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10)
+        )
+        
+    def forward(self, x):
+        return self.encoder(x.view(x.size(0), -1))
+```
+
+## 生命周期鉤子
+
+`LightningModule` 為訓練生命週期的每個階段都提供了鉤子：
+
+| 鉤子（Hook） | 階段 | 描述 |
+| :--- | :--- | :--- |
+| `__init__` | 初始化 | 初始化網路層和超參數 |
+| `configure_optimizers` | 初始化 | 設定優化器（optimizers）和學習率排程器（LR schedulers） |
+| `training_step` | 訓練 | 處理一個訓練批次（batch） |
+| `on_train_epoch_end` | 訓練 | 聚合 Epoch 級別的訓練結果 |
+| `validation_step` | 驗證 | 處理一個驗證批次 |
+| `on_validation_epoch_end` | 驗證 | 聚合驗證結果 |
+| `test_step` | 測試 | 處理一個測試批次 |
+| `on_test_epoch_end` | 測試 | 聚合測試結果 |
+| `predict_step` | 推理 | 處理一個批次用於預測 |
+
+## 步驟方法（Step Methods）
+
+### training_step
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    logits = self(x)
+    loss = nn.functional.cross_entropy(logits, y)
+    
+    # 將損失記錄到記錄器（logger）和進度條
+    self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+    
+    return loss
+```
+
+| 參數 | 類型 | 描述 |
+| :--- | :--- | :--- |
+| `batch` | `Any` | 來自 DataLoader 的一個批次資料 |
+| `batch_idx` | `int` | 此批次在目前 Epoch 中的索引 |
+
+回傳值：損失（包含 `"loss"` 鍵的字典）或包含損失及其他項目的字典。
+
+### validation_step / test_step / predict_step
+
+```python
+def validation_step(self, batch, batch_idx):
+    x, y = batch
+    logits = self(x)
+    loss = torch.nn.functional.cross_entropy(logits, y)
+    
+    # 記錄驗證指標
+    self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+    
+    # 計算準確率
+    preds = torch.argmax(logits, dim=1)
+    acc = (preds == y).float().mean()
+    self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+```
+
+```python
+def predict_step(self, batch, batch_idx):
+    x, _ = batch
+    logits = self(x)
+    return torch.argmax(logits, dim=1)  # 回傳預測結果
+```
+
+:::tip[一致的 API]
+所有的步驟方法共享相同的簽名。`test_step` 和 `predict_step` 是可選的——如果未被覆寫，它們會預設呼叫 `validation_step`。
+:::
+
+## configure_optimizers
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+    
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=3, verbose=True
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "monitor": "val_loss",
+        }
+    }
+```
+
+此方法在訓練開始前僅被呼叫一次。它可以回傳：
+
+| 回傳類型 | 使用場景 |
+| :--- | :--- |
+| `Optimizer` | 單個優化器 |
+| `List[Optimizer]` | 多個優化器（例如，用於 GAN） |
+| `Dict` | 帶有監控指標的優化器和學習率排程器 |
+| `List[Dict]` | 多個帶有獨立排程器的優化器 |
+| `configure_optimizers` | 實作此方法的自訂類別 |
+
+### 單個優化器（最常見）
+
+```python
+def configure_optimizers(self):
+    return torch.optim.Adam(self.parameters(), lr=1e-3)
+```
+
+### 帶學習率排程器
+
+```python
+def configure_optimizers(self):
+    optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+    
+    # 基於 Step 的排程器
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=10, eta_min=1e-6
+    )
+    
+    return {
+        "optimizer": optimizer,
+        "lr_scheduler": {
+            "scheduler": scheduler,
+            "interval": "epoch",  # 或是 "step"
+            "frequency": 1
+        }
+    }
+```
+
+### 多個優化器（例如 GAN）
+
+```python
+def configure_optimizers(self):
+    opt_G = torch.optim.Adam(self.generator.parameters(), lr=1e-3)
+    opt_D = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
+    
+    return [opt_G, opt_D]
+```
+
+## 與 nn.Module 的對比
+
+| 方面 | `nn.Module` | `LightningModule` |
+| :--- | :--- | :--- |
+| 繼承 | `nn.Module` | 繼承自 `nn.Module` |
+| 前向傳播 | `forward()` | `forward()` |
+| 參數管理 | 手動管理 | 自動追蹤 |
+| 訓練迴圈 | 您自己編寫 | Lightning 提供 |
+| 裝置放置 | 手動（`model.to(device)`） | 自動放置 |
+| 日誌記錄 | 手動記錄 | `self.log()` |
+| 模型檢查點（Checkpointing） | 手動儲存 | 透過回呼（callbacks）自動儲存 |
+| 優化器配置 | 手動 | `configure_optimizers()` |
+
+### 等效程式碼
+
+```python
+# 原生 PyTorch
+class MyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = nn.Linear(10, 10)
+    
+    def forward(self, x):
+        return self.layer(x)
+
+# Lightning
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.layer = nn.Linear(10, 10)
+    
+    def forward(self, x):
+        return self.layer(x)
+```
+
+模型程式碼本身完全相同。不同之處在於 Lightning 在它周圍提供的附加功能。
+
+## 手動優化
+
+當您需要對訓練迴圈進行全面控制時——比如用於 GAN、多個優化器或自訂梯度裁剪——請使用手動優化。要啟用它，在 `__init__` 中設定 `self.automatic_optimization = False`。
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.layer = nn.Linear(10, 1)
+        # 1. 停用自動優化
+        self.automatic_optimization = False
+        
+    def training_step(self, batch, batch_idx):
+        # 2. 存取優化器
+        opt = self.optimizers()
+        
+        x, y = batch
+        output = self(x)
+        loss = torch.nn.functional.cross_entropy(output, y)
+        
+        # 3. 清空梯度
+        opt.zero_grad()
+        
+        # 4. 反向傳播
+        self.manual_backward(loss)
+        
+        # (可選) 自訂梯度裁剪
+        self.clip_gradients(opt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+        
+        # 5. 優化器步進
+        opt.step()
+```
+
+:::caution[手動優化]
+僅在必要時使用手動優化。它會繞過 Lightning 的自動優化迴圈。在切換到手動優化之前，請先考慮內建的 Trainer 標誌（例如 `accumulate_grad_batches`，`gradient_clip_val`）是否已經滿足您的需求。
+:::
+
+## 完整範例：MNIST 分類器
+
+```python
+import lightning as L
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
+
+class MNISTModel(L.LightningModule):
+    def __init__(self, lr: float = 1e-3):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.fc1 = nn.Linear(64 * 7 * 7, 128)
+        self.fc2 = nn.Linear(128, 10)
+        self.lr = lr
+    
+    def forward(self, x):
+        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        x = F.relu(F.max_pool2d(self.conv2(x), 2))
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+    
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+    
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == y).float().mean()
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val_acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+```
+
+```python
+# 訓練
+model = MNISTModel()
+trainer = L.Trainer(max_epochs=10, accelerator="gpu", devices=1)
+trainer.fit(model)
+```
+
+這就是您所需要編寫的全部內容——Lightning 負責處理資料載入、裝置分配、優化迴圈、日誌記錄以及模型檢查點儲存。

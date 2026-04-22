@@ -1,0 +1,119 @@
+---
+sidebar_position: 1
+title: Lightning 核心理念
+description: 了解什么是 Lightning，它的核心理念以及它为什么存在。
+---
+
+# Lightning 核心理念
+
+## 什么是 PyTorch Lightning
+
+PyTorch Lightning 是一个基于 PyTorch 的轻量级包装器，它将研究代码与工程样板代码分离开来。它为构建深度学习模型提供了一个结构化的框架，而不会牺牲灵活性。
+
+Lightning 不是一个隐藏 PyTorch 的高级 API——它是一个薄层，可以自动执行跨项目重复的训练部分，同时让您控制关键的研究逻辑。
+
+## 核心理念
+
+Lightning 遵循一个原则：**将研究代码与工程代码分离**。
+
+### 研究代码（您的职责）
+
+- 模型架构
+- 损失函数和指标
+- 训练步骤逻辑（前向传播、损失计算）
+- 验证/测试步骤逻辑
+- 优化器配置
+
+### 工程代码（Lightning 自动执行）
+
+- Epoch 和 batch 迭代
+- 设备分配（CPU、GPU、TPU）
+- 混合精度训练（AMP）
+- 分布式训练中的梯度同步
+- 检查点 (Checkpointing) 和模型保存
+- 日志集成
+- 早停 (Early stopping) 和学习率调度
+- 调试实用程序（分析、快速开发运行）
+
+这种分离意味着无论是在 1 个 GPU 还是 1000 个 GPU 上训练，您编写的研究代码都是相同的。
+
+## 为什么需要 Lightning
+
+尽管 PyTorch 非常灵活，但研究团队经常面临以下挑战：
+
+### 重复的样板代码
+
+每个 PyTorch 项目都实现了相同的训练循环：
+
+```python
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        optimizer.zero_grad()
+        output = model(batch)
+        loss = criterion(output, target)
+        loss.backward()
+        optimizer.step()
+```
+
+这段代码在不同项目中几乎完全相同，但却占用了数百行代码。Lightning 将其简化为：
+
+```python
+trainer.fit(model, datamodule=datamodule)
+```
+
+### 可重复性问题
+
+不一致的训练循环使得重现结果变得困难。Lightning 标准化了训练的各个方面——梯度在反向传播前清零，优化器在反向传播后步进，检查点在定义的间隔发生。什么时候发生什么没有任何歧义。
+
+### 扩展摩擦
+
+从单 GPU 扩展到多 GPU 通常需要重写训练循环。Lightning 把它变成了一个配置更改：
+
+```python
+# 单 GPU
+trainer = Trainer(accelerator="gpu", devices=1)
+
+# 多 GPU (只需更改这个)
+trainer = Trainer(accelerator="gpu", devices=4, strategy="ddp")
+```
+
+### 团队协作
+
+当每个项目都有不同的训练循环结构时，代码审查的重点在于循环的正确性而不是模型逻辑。Lightning 强制执行一个团队能够立即识别的一致结构，从而加快审查速度并降低入职难度。
+
+## 为什么 Lightning 感觉“僵硬”
+
+最常见的批评是 Lightning 强制执行结构——一些开发人员觉得受到了 `training_step` 和 `configure_optimizers` 等钩子 (hooks) 的限制。
+
+这种僵硬是故意的。这些约束提供了：
+
+- **一致性**：每个 Lightning 项目都遵循相同的结构。
+- **调试**：当出现问题时，您确切地知道去哪里找。
+- **扩展性**：结构化的钩子使得分布式训练成为可能。
+- **可维护性**：六个月后，您仍然能理解自己的代码。
+
+:::tip[在结构中保持灵活]
+Lightning 提供了多种方法来完成同一任务。当您需要完全控制训练循环时，请使用[手动优化 (manual optimization)](../core-components/lightning-module) ，或者子类化 Trainer 进行深度自定义。
+:::
+
+## 分布式训练
+
+Lightning 最大的优势之一就是对原生分布式训练的支持。无需更改您的模型代码，即可在以下设备上进行训练：
+
+- **单 GPU**：默认行为
+- **多 GPU (DataParallel)**：`strategy="dp"` 
+- **多 GPU (Distributed)**：`strategy="ddp"` 或 `"ddp_spawn"`
+- **多节点 (Multi-Node)**：`num_nodes=N`
+- **TPU**：`accelerator="tpu"`
+- **DeepSpeed**：`strategy="deepspeed"`
+- **FSDP**：`strategy="fsdp"`
+
+相同的模型代码可以运行在所有这些配置上——唯一需要改变的就是 Trainer 的标志参数。
+
+## 关于 Lightning Fabric 的说明
+
+如果您需要 Lightning 的设备管理和分布式扩展能力，但又不需要 `LightningModule` 和 `Trainer` 那种僵硬的结构，Lightning 2.0 引入了 **Lightning Fabric**。
+
+Fabric 是一种快速、轻量级的方案，用于扩展原生 PyTorch。它提供了一个极简的 `fabric` 对象，可以将其注入现有的原生 PyTorch 循环中，获得对 DeepSpeed、FSDP 和混合精度的支持，同时保留完全自定义的训练循环结构。
+
+本教程侧重于完整的 `LightningModule` + `Trainer` 体验，但如果您拥有高度自定义的训练循环且无法很好地适应 Lightning 钩子系统，请考虑使用 Fabric。

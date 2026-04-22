@@ -1,0 +1,39 @@
+---
+title: PyTorch Lightning 教學
+description: 全面介紹 PyTorch Lightning，用於可擴展的深度學習研究和生產。
+---
+
+# PyTorch Lightning 教學
+
+PyTorch Lightning 是一個輕量級的 PyTorch 包裝器，它抽象了繁瑣的工程樣板程式碼，同時保留了對研究邏輯的完全控制。它標準化了訓練迴圈，只需更改一行配置即可啟用分散式訓練，並與現代 MLOps 工具無縫整合。
+
+本節涵蓋了 Lightning 的核心理念、心智模型和核心組件。學完之後，您將了解 Lightning 如何組織您的 PyTorch 程式碼，並準備好以最少的樣板程式碼構建、訓練和擴展模型。
+
+## 本節涵蓋的內容
+
+| 章節 | 主題 |
+| :--- | :--- |
+| 簡介 | 核心理念、心智模型和掛鉤 (Hook) 系統 |
+| 核心組件 | LightningModule、DataModule、Trainer、Callbacks、Logging |
+| Hydra 整合 | 使用 Hydra 進行配置管理 |
+| 自定義實現 | 擴展和自定義 Lightning |
+| 最佳實踐 | 生產環境就緒模式和除錯 |
+| 遷移 | 將現有的 PyTorch 程式碼轉換為 Lightning |
+
+## 預備知識
+
+本教學假定您熟悉原生的 PyTorch：
+
+- 張量 (Tensors)、設備 (devices) 和自動求導 (autograd)
+- `torch.nn.Module` 和模型構建
+- `Dataset`、`DataLoader` 和數據管道
+- 優化器、學習率排程器和損失函數
+- 基本的訓練迴圈實現
+
+如果您需要複習這些基礎知識，請先從 [PyTorch 教學](../pytorch-tutorial/) 開始。
+
+## 導覽指南
+
+1. **Lightning 新手**：從 [核心理念](./introduction/philosophy) 開始了解為什麼需要 Lightning，然後閱讀 [心智模型](./introduction/mental-model) 以了解它如何組織程式碼。
+2. **構建第一個模型**：轉到 [LightningModule](./core-components/lightning-module) 和 [DataModule](./core-components/datamodule) 構建您的第一個訓練管道。
+3. **自定義訓練**：探索 [Trainer](./core-components/trainer)、[Callbacks](./core-components/callbacks) 和 [Logging](./core-components/logging-metrics) 以進行進階自定義。

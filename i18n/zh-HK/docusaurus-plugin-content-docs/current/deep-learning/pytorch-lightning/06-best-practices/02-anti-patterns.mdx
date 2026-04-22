@@ -1,0 +1,612 @@
+---
+sidebar_position: 2
+title: 反模式 (Anti-Patterns)
+description: PyTorch Lightning 中常見的反模式，這些模式會導致錯誤、效能問題和維護困難。
+---
+
+# 反模式 (Anti-Patterns)
+
+本指南記錄了在 PyTorch Lightning 中應避免的常見反模式。這些模式通常源於試圖在 Lightning 中直接複製原生 PyTorch 的行為。
+
+## 在 `training_step` 中呼叫 `.backward()`
+
+最常見的錯誤之一是在訓練步驟 (training step) 中明確呼叫 `.backward()` 或 `optimizer.step()`。
+
+### ❌ 錯誤做法
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        pred = self(x)
+        loss = nn.functional.cross_entropy(pred, y)
+
+        # ❌ 錯誤：手動反向傳播
+        loss.backward()
+
+        # ❌ 錯誤：手動優化器步進
+        self.optimizers().step()
+
+        return loss
+```
+
+### ✅ 正確做法
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        pred = self(x)
+        loss = nn.functional.cross_entropy(pred, y)
+
+        # ✅ 正確：返回損失，讓 Trainer 處理 backward 和 step
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
+```
+
+### 何時可以接受手動優化 (Manual Optimization)
+
+僅將手動優化用於特定研究的梯度操作：
+
+```python
+class GradientAccumulationModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.accumulate_every_n = 4
+
+        # 重要：需要開啟手動優化
+        self.automatic_optimization = False
+
+    def training_step(self, batch, batch_idx):
+        opt = self.optimizers()
+
+        # 自訂損失計算
+        loss = self.compute_loss(batch)
+        
+        # 將損失根據累積步數平均
+        loss = loss / self.accumulate_every_n
+
+        # 手動梯度累積
+        self.manual_backward(loss)
+
+        if (batch_idx + 1) % self.accumulate_every_n == 0:
+            opt.step()
+            opt.zero_grad()
+```
+
+:::caution[手動優化]
+僅在實作自訂梯度行為時使用手動優化。標準訓練永遠不需要它。
+:::
+
+---
+
+
+## 手動計算跨 Epoch 平均的指標
+
+在每個 batch 中手動計算指標（如準確率）並在日誌中使用 `on_epoch=True`，如果最後一個 batch 的大小與其他 batch 不同，會導致在數學上不正確的 epoch 級別平均值。Lightning 會對你返回的*值*進行平均，而不是追蹤正確的總數 / 樣本總數。
+
+### ❌ 錯誤做法
+
+```python
+class MyModel(L.LightningModule):
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        
+        # ❌ 錯誤：手動計算每個 batch 的準確率
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == y).float().mean()
+        
+        # ❌ 錯誤：記錄手動計算的平均值會導致不正確的 epoch 級別指標
+        self.log("val_acc", acc, on_epoch=True)
+        return F.cross_entropy(logits, y)
+```
+
+### ✅ 正確做法
+
+```python
+import torchmetrics
+
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ✅ 正確：使用 TorchMetrics
+        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=10)
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        
+        # ✅ 正確：TorchMetrics 會正確累積真實正例 / 樣本總數
+        self.accuracy(logits, y)
+        self.log("val_acc", self.accuracy, on_epoch=True)
+        return F.cross_entropy(logits, y)
+```
+
+## 在 LightningModule 內部管理設備
+
+Lightning 自動處理設備（CPU/GPU等）的放置。切勿手動將張量 (tensor) 移動到設備上。
+
+### ❌ 錯誤做法
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+
+        # ❌ 錯誤：手動設備管理
+        x = x.to(self.device)
+        y = y.to(self.device)
+
+        pred = self(x)
+        return pred
+```
+
+### ✅ 正確做法
+
+```python
+class MyModel(L.LightningModule):
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        # ✅ 正確：Trainer 會自動處理設備放置
+        pred = self(x)
+        return pred
+
+    def forward(self, x):
+        # 輸入已經在正確的設備上了
+        return self.layers(x)
+```
+
+### ❌ 錯誤做法：在 DataModule 中自訂設備放置
+
+```python
+# ❌ 錯誤：在資料集中進行手動設備放置
+class MyDataset(Dataset):
+    def __getitem__(self, idx):
+        x = torch.load(f"data/{idx}.pt")
+        # 不要在這裡手動移動到設備
+        return x.to("cuda")  # 絕對不要這樣做
+```
+
+### ✅ 正確做法：讓 Trainer 處理設備
+
+```python
+# ✅ 正確：在資料集中保留張量在 CPU 上
+class MyDataset(Dataset):
+    def __getitem__(self, idx):
+        x = torch.load(f"data/{idx}.pt")
+        return x  # 保持在 CPU 上
+
+# Trainer 會處理設備放置
+trainer = L.Trainer(accelerator="cuda", devices=1)
+# 所有資料將自動移動到 CUDA
+```
+
+:::info[設備管理]
+Lightning 自動移動：
+- 模型參數到選定的設備
+- DataLoader 中的 batch 資料到設備
+- 指標和損失到設備
+絕不要在 LightningModule 的 hooks 中手動呼叫 `.to(device)`。
+:::
+
+---
+
+## 硬編碼路徑和超參數
+
+永遠不要在程式碼中硬編碼檔案路徑、學習率或其他超參數。
+
+### ❌ 錯誤做法
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ❌ 錯誤：硬編碼的值
+        self.lr = 1e-3
+        self.data_dir = "/path/to/data"
+```
+
+```python
+# ❌ 錯誤：在訓練腳本中硬編碼
+trainer = L.Trainer(
+    max_epochs=100,
+    devices=1,
+)
+```
+
+### ✅ 正確做法：使用 Hydra 配置
+
+```yaml
+# config/train.yaml
+model:
+  learning_rate: 1e-3
+  hidden_size: 256
+
+data:
+  data_dir: ./data
+  batch_size: 32
+
+trainer:
+  max_epochs: 100
+  accelerator: auto
+  devices: auto
+```
+
+```python
+# ✅ 正確：將配置傳遞給元件
+@hydra.main(version_base=None, config_path="config", config_name="train")
+def main(cfg: DictConfig):
+    model = MyModel(**cfg.model)
+    dm = MyDataModule(**cfg.data)
+    trainer = L.Trainer(**cfg.trainer)
+```
+
+### 路徑的環境變數
+
+```python
+# ✅ 正確：為敏感路徑使用環境變數
+import os
+
+data_dir = os.environ.get("DATA_DIR", "./data")
+checkpoint_dir = os.environ.get("CHECKPOINT_DIR", "./checkpoints")
+```
+
+---
+
+## 繞過 Trainer
+
+使用 Lightning 時，避免編寫原始的 PyTorch 訓練迴圈。Trainer 處理了許多邊緣情況。
+
+### ❌ 錯誤做法：混合方法
+
+```python
+# ❌ 錯誤：混合使用 Lightning 和原生 PyTorch
+trainer = L.Trainer()
+
+for epoch in range(num_epochs):
+    # 手動 epoch 迴圈
+    for batch in dataloader:
+        # 手動訓練
+        outputs = model(batch)
+        loss = criterion(outputs, batch[1])
+        loss.backward()
+        optimizer.step()
+
+    # 使用 Lightning 進行驗證
+    trainer.validate(model, dataloader)
+```
+
+### ✅ 正確做法：完整的 Lightning 方法
+
+```python
+# ✅ 正確：讓 Trainer 處理一切
+trainer = L.Trainer(max_epochs=10)
+trainer.fit(model, dataloader)  # 訓練 + 驗證
+```
+
+### 何時適合使用原生 PyTorch
+
+僅在以下情況使用原生 PyTorch：
+
+- 沒有 Trainer 的推論過程
+- 自訂分散式訓練邏輯
+- 除錯 Lightning 內部機制
+
+```python
+# 適當的原生 PyTorch 用法：推論
+model = MyModel.load_from_checkpoint("best.ckpt")
+model.eval()
+
+with torch.no_grad():
+    predictions = model(test_input)
+```
+
+---
+
+## 混合配置策略
+
+不要將 Hydra 與 `argparse` 或其他配置方法混合使用。
+
+### ❌ 錯誤做法
+
+```python
+# ❌ 錯誤：混合使用 Hydra 和 argparse
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--lr", type=float)
+args = parser.parse_args()
+
+
+@hydra.main(config_path="config", config_name="train")
+def main(cfg):
+    # 衝突：cfg 有 learning_rate，args 有 lr
+    model = MyModel(learning_rate=cfg.model.lr)  # Hydra 會勝出，但很混亂
+```
+
+### ✅ 正確做法：單一配置來源
+
+```python
+# ✅ 正確：獨家使用 Hydra
+@hydra.main(config_path="config", config_name="train")
+def main(cfg: DictConfig):
+    model = MyModel(**cfg.model)
+    trainer = L.Trainer(**cfg.trainer)
+```
+
+### 命令列 + Hydra
+
+```bash
+# 從命令列覆蓋
+python train.py model.learning_rate=3e-4 data.batch_size=64
+```
+
+---
+
+## 忽略 DDP 中的 `self.log` 同步
+
+在分散式訓練中，不正確的日誌同步會導致錯誤的指標。
+
+### ❌ 錯誤做法
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ❌ 錯誤：在 DDP 中沒有進行同步
+    self.log("train_loss", loss)
+
+    return loss
+```
+
+### ✅ 正確做法
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ✅ 正確：恰當的同步
+    self.log(
+        "train_loss",
+        loss,
+        on_step=True,       # 記錄每步指標（在 DDP 中：按 batch 按 rank 記錄）
+        on_epoch=True,      # 在 epoch 結束時聚合
+        sync_dist=True,     # 在所有 GPU 之間同步
+        reduce_fx="mean",   # 如何在 GPU 之間進行 reduce（降維）
+    )
+
+    return loss
+```
+
+### 理解同步行為 (Sync Behavior)
+
+| `sync_dist` | `on_epoch` | 行為 |
+|-------------|-------------|----------|
+| `False` | `False` | 僅在當前 rank 上記錄 step 的值 |
+| `True` | `False` | 記錄 step 的值，並在各個 rank 之間同步 |
+| `False` | `True` | 僅從當前 rank 在 epoch 結束時進行聚合 |
+| `True` | `True` | 從所有 rank 在 epoch 結束時進行聚合 |
+
+```python
+# ✅ 推薦做法：明確的日誌記錄
+def validation_step(self, batch, batch_idx):
+    pred = self(batch[0])
+    loss = nn.functional.cross_entropy(pred, batch[1])
+
+    self.log(
+        "val_loss",
+        loss,
+        on_step=False,      # 不記錄每步指標
+        on_epoch=True,      # 在 epoch 結束時聚合
+        sync_dist=True,     # 在所有 GPU 之間同步
+        prog_bar=True,      # 在進度條中顯示
+    )
+```
+
+:::caution[DDP 日誌記錄錯誤]
+分散式訓練中的常見問題：
+- `sync_dist=False` 導致指標不正確（僅顯示單個 GPU 的值）
+- 未使用 `reduce_fx` 導致意外的聚合結果
+- 同時開啟 step 和 epoch 記錄但沒有明確意圖
+:::
+
+---
+
+## 使用已棄用的 API
+
+Lightning 2.0 棄用了幾個舊的 API。請相應地更新程式碼。
+
+### 已棄用：`weights_summary`
+
+```python
+# ❌ 在 Lightning 2.0 中已被棄用
+trainer = L.Trainer(weights_summary="full")
+```
+
+```python
+# ✅ 使用 model.summarize() 代替
+trainer = L.Trainer()
+model.summarize()
+```
+
+### 已棄用：`rnn_utils` 匯入
+
+```python
+# ❌ 已棄用的匯入
+from pytorch_lightning.core import rnn_utils
+
+# ✅ 使用 torch.nn.utils.rnn 代替
+from torch.nn.utils.rnn import pack_padded_sequence
+```
+
+### 已棄用：`enable_validation`
+
+```python
+# ❌ 已棄用
+trainer = L.Trainer(enable_validation=True)  # 預設即為 True
+
+# ✅ 根本不需要傳遞它
+trainer = L.Trainer()  # 預設啟用了驗證
+```
+
+### 已棄用：`auto_select_gpus`
+
+```python
+# ❌ 在 Lightning 2.0 中已被棄用
+trainer = L.Trainer(auto_select_gpus=True)
+
+# ✅ 使用 devices + accelerator 代替
+trainer = L.Trainer(accelerator="auto", devices="auto")
+```
+
+---
+
+## 沒有梯度的巨大 Batch Size 累積
+
+不正確地累積梯度會導致實際有效學習率發生變化。
+
+### ❌ 錯誤做法
+
+```python
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ❌ 錯誤：除以了損失但沒有規範化梯度，如果使用自動優化這是完全錯誤的
+    loss = loss / 4
+    loss.backward()  # 如果手動呼叫，梯度是預期的 1/4
+
+    # 每 4 個 batch 手動 step 一次
+    if batch_idx % 4 == 0:
+        self.optimizers().step()
+        self.optimizers().zero_grad()
+```
+
+### ✅ 正確做法：Lightning 內建的梯度累積
+
+```python
+# ✅ 讓 Lightning 處理累積
+trainer = L.Trainer(
+    accumulate_grad_batches=4,  # 自動累積
+)
+```
+
+### ✅ 正確做法：帶有恰當歸一化的手動累積
+
+```python
+def __init__(self):
+    super().__init__()
+    self.automatic_optimization = False
+
+def training_step(self, batch, batch_idx):
+    x, y = batch
+    pred = self(x)
+    loss = nn.functional.cross_entropy(pred, y)
+
+    # ✅ 正確：在 backward 之前歸一化損失
+    self.manual_backward(loss / 4)  # 歸一化以保證總和正確
+
+    # 每 4 個 batch 進行 step
+    if (batch_idx + 1) % 4 == 0:
+        self.optimizers().step()
+        self.optimizers().zero_grad()
+```
+
+---
+
+## 不使用 `train_dataloader` 建議的返回類型
+
+返回錯誤的類型會導致難以察覺的 bug。
+
+### ❌ 錯誤做法
+
+```python
+def train_dataloader(self):
+    # ❌ 錯誤：返回了串列而不是 DataLoader
+    return [batch for batch in dataset]
+```
+
+### ✅ 正確做法
+
+```python
+def train_dataloader(self):
+    # ✅ 必須返回 DataLoader (或可迭代物件)
+    return DataLoader(dataset, batch_size=32)
+```
+
+---
+
+## State Dict (狀態字典) 問題
+
+不恰當的狀態管理會破壞檢查點功能。
+
+### ❌ 錯誤做法
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ❌ 普通的串列/字典不會被自動保存
+        self.buffers = [torch.zeros(10) for _ in range(5)]
+```
+
+### ✅ 正確做法
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        # ✅ 使用 nn.ParameterList 或註冊為 buffer
+        self.buffers = nn.ParameterList([
+            nn.Parameter(torch.zeros(10)) for _ in range(5)
+        ])
+```
+
+### 備選方案：手動的 State Dict
+
+```python
+class MyModel(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.custom_state = {"key": torch.zeros(10)}
+
+    def state_dict(self):
+        # ✅ 複寫方法以包含自訂狀態
+        state = super().state_dict()
+        state.update(self.custom_state)
+        return state
+
+    def load_state_dict(self, state_dict):
+        # ✅ 複寫方法以載入自訂狀態
+        self.custom_state = state_dict.pop("custom_state")
+        super().load_state_dict(state_dict)
+```
+
+---
+
+## 快速參考：反模式總結
+
+| 反模式 | 錯誤做法 | 正確做法 |
+|-------------|-----------|---------|
+| Backward 呼叫 | 在 training_step 中使用 `loss.backward()` | 返回損失 (或在手動優化中正確使用 `self.manual_backward`) |
+| 設備管理 | 手動呼叫 `x.to(device)` | 交給 Trainer 處理 |
+| 配置方式 | 硬編碼的值 | Hydra 配置 |
+| 訓練迴圈 | 手動迴圈 + Trainer | 使用完整的 Trainer |
+| 混合配置 | Hydra + argparse | 僅使用 Hydra |
+| DDP 日誌 | `sync_dist=False` | `sync_dist=True` |
+| 梯度累積 | 手動且不進行歸一化 | 歸一化損失 (或交給Trainer處理) |
+
+---
+
+## 下一步驟
+
+- [模板倉庫 (Template Repository)](https://github.com/SAILTECHTEAM/pytorch-lightning-hydra-template) — 乾淨整潔的實作範例
+- [遷移指南 (Migration Guide)](../05-migration/01-native-to-lightning.mdx) — 一步步的遷移指導
