@@ -78,7 +78,8 @@ const config: Config = {
   ],
 
   stylesheets: [
-    'https://fonts.googleapis.com/css2?family=Roboto:wght@100..900&family=Roboto+Mono:wght@100..900&display=swap',
+    'https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Source+Code+Pro:wght@200..900&display=swap',
+    'https://fonts.googleapis.com/css2?family=Google+Sans+Code:ital,wght,MONO@0,300..800,1;1,300..800,1&family=Intel+One+Mono:ital,wght@0,300..700;1,300..700&display=swap',
   ],
 
   presets: [

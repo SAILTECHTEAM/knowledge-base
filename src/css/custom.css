@@ -15,12 +15,12 @@
   --ifm-color-primary-light: #33925d;
   --ifm-color-primary-lighter: #359962;
   --ifm-color-primary-lightest: #3cad6e;
-  --ifm-code-font-size: 95%;
+  --ifm-code-font-size: 88%;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
 
   /* Font families */
-  --ifm-font-family-base: 'Roboto', system-ui, -apple-system, sans-serif;
-  --ifm-font-family-monospace: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
+  --ifm-font-family-monospace: 'Google Sans Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* Line height - compact but descender-friendly */
   --ifm-line-height-base: 1.45;
