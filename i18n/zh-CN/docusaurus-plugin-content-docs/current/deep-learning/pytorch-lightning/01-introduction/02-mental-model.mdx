@@ -27,21 +27,21 @@ Lightning 用**钩子系统**取代了显式的训练循环。您只需实现特
 
 ```mermaid
 flowchart TD
-    A[Start Training] --> B[on_fit_start]
-    B --> C[setup for train/val]
-    C --> D[Epoch Loop]
-    D --> E[on_epoch_start]
-    E --> F[Batch Loop]
-    F --> G[training_step]
-    G --> H[on_train_batch_end]
-    H --> I{More batches?}
+    A[开始训练] --> B[`on_fit_start`]
+    B --> C[设置训练/验证]
+    C --> D[Epoch 循环]
+    D --> E[`on_epoch_start`]
+    E --> F[Batch 循环]
+    F --> G[`training_step`]
+    G --> H[`on_train_batch_end`]
+    H --> I{更多 batch?}
     I -- Yes --> F
-    I -- No --> J[on_train_epoch_end]
-    J --> K[on_validation_epoch_end]
-    K --> L[optimizer_step]
-    L --> M{More epochs?}
+    I -- No --> J[`on_train_epoch_end`]
+    J --> K[`on_validation_epoch_end`]
+    K --> L[优化器步进]
+    L --> M{更多 epoch?}
     M -- Yes --> D
-    M -- No --> N[on_fit_end]
+    M -- No --> N[`on_fit_end`]
 ```
 
 ### 关键钩子参考

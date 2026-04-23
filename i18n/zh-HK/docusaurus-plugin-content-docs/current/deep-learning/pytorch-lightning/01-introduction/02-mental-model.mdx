@@ -27,21 +27,21 @@ Lightning 用**掛鉤系統**取代了顯式的訓練迴圈。您只需實現特
 
 ```mermaid
 flowchart TD
-    A[Start Training] --> B[on_fit_start]
-    B --> C[setup for train/val]
-    C --> D[Epoch Loop]
-    D --> E[on_epoch_start]
-    E --> F[Batch Loop]
-    F --> G[training_step]
-    G --> H[on_train_batch_end]
-    H --> I{More batches?}
+    A[開始訓練] --> B[`on_fit_start`]
+    B --> C[設置訓練/驗證]
+    C --> D[Epoch 迴圈]
+    D --> E[`on_epoch_start`]
+    E --> F[Batch 迴圈]
+    F --> G[`training_step`]
+    G --> H[`on_train_batch_end`]
+    H --> I{更多 batch?}
     I -- Yes --> F
-    I -- No --> J[on_train_epoch_end]
-    J --> K[on_validation_epoch_end]
-    K --> L[optimizer_step]
-    L --> M{More epochs?}
+    I -- No --> J[`on_train_epoch_end`]
+    J --> K[`on_validation_epoch_end`]
+    K --> L[優化器步進]
+    L --> M{更多 epoch?}
     M -- Yes --> D
-    M -- No --> N[on_fit_end]
+    M -- No --> N[`on_fit_end`]
 ```
 
 ### 關鍵掛鉤參考
