@@ -1,0 +1,369 @@
+---
+sidebar_position: 9
+title: 終端機多工器
+description: Zellij、tmux 與 dtach 的比較 — 用於 SSH 工作流程和持久化工作階段的終端機工作階段管理工具。
+---
+
+# 終端機多工器
+
+終端機多工器允許透過單一視窗管理多個終端機工作階段，支援在 SSH 連線中斷後分離和重新連線，並在斷網後保持程序運行。
+
+---
+
+## 比較
+
+| 特性 | Zellij | tmux | dtach |
+| :--- | :--- | :--- | :--- |
+| **語言** | Rust | C | C |
+| **設定方式** | KDL（人類可讀格式） | tmux.conf（DSL） | 最少的命令列參數 |
+| **版面配置系統** | 內建浮動/堆疊窗格 | 手動分割管理 | 不支援版面配置管理 |
+| **工作階段管理** | 完整（列出/連線/終止） | 完整（列出/連線/終止） | 無（僅支援單一程序） |
+| **外掛系統** | 基於 WASM 的外掛 | 基於指令碼的擴充 | 無 |
+| **學習曲線** | 低（介面直覺） | 中等（設定複雜） | 非常低 |
+| **預設狀態列** | 有（資訊豐富） | 有（可自訂） | 無 |
+| **多工功能** | 完整（窗格、分頁、版面配置） | 完整（窗格、視窗） | 無（僅支援單一程序） |
+| **開發狀態** | 活躍 | 活躍 | 維護模式 |
+| **執行檔大小** | ~15 MB | ~4 MB | ~30 KB |
+
+### 適用場景
+
+- **Zellij** — 建議用於新專案。直覺的按鍵綁定、內建版面配置管理和 WASM 外掛支援使其成為現代工作流程的最佳選擇。
+- **tmux** — 成熟的標準工具，生態系龐大。當團隊已使用 tmux 或現有設定/指令碼依賴 tmux 時，優先選擇。
+- **dtach** — 最小化的程序分離/重連工具，無多工功能。當只需要在登出後保持單一程序運行（如長時間執行的建置或開發伺服器），且不需要窗格管理或工作階段切換時使用。
+
+---
+
+## Zellij
+
+Zellij 是一個用 Rust 編寫的現代終端機多工器，注重人體工學和易用性。其預設按鍵綁定可透過浮動說明窗格發現。
+
+### 主要功能
+
+- **工作階段管理** — 建立、連線、分離和終止工作階段
+- **版面配置** — 將複雜的窗格排列儲存為命名版面配置並還原
+- **浮動窗格** — 在平鋪版面配置上疊加浮動窗格
+- **堆疊窗格** — 將窗格堆疊在單一區域以便快速切換
+- **WASM 外掛** — 透過 WebAssembly 外掛擴充功能
+
+### 快速開始
+
+```bash
+# 啟動一個新的命名工作階段
+zellij --session myproject
+
+# 連線到現有工作階段
+zellij attach myproject
+
+# 列出活躍工作階段
+zellij list-sessions
+```
+
+### 預設按鍵綁定
+
+| 按鍵 | 操作 |
+| :--- | :--- |
+| `Ctrl+t` | 前綴鍵（所有按鍵綁定以此開頭） |
+| `Ctrl+t` 然後 `n` | 新增窗格 |
+| `Ctrl+t` 然後 `←/→/↑/↓` | 在窗格間切換 |
+| `Ctrl+t` 然後 `d` | 分離工作階段 |
+| `Ctrl+t` 然後 `x` | 關閉窗格 |
+| `Ctrl+t` 然後 `?` | 切換浮動說明窗格 |
+
+### 安裝
+
+#### 透過安裝指令碼
+
+以下指令碼從原始碼編譯（需要 Rust 工具鏈），失敗時回退到預編譯執行檔：
+
+```bash
+#!/usr/bin/env bash
+
+# Zellij 安裝指令碼
+# 透過 cargo install 從原始碼編譯，回退到預編譯執行檔
+
+set -euo pipefail
+
+# 載入公共函數
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+
+# 設定
+ZELLIJ_VERSION="v0.44.3"
+ZELLIJ_CARGO_VERSION="0.44.3"
+ZELLIJ_CONFIG="${HOME}/.config/zellij/config.kdl"
+REPO_ROOT="$(get_repo_path)"
+REPO_CONFIG="${REPO_ROOT}/.config/zellij/config.kdl"
+AUTO_YES=0
+DO_INSTALL=1
+DO_SYNC=1
+
+ensure_cargo() {
+    if [[ -f "${HOME}/.cargo/env" ]]; then
+        source "${HOME}/.cargo/env"
+    fi
+    check_command_exists cargo
+}
+
+install_zellij_cargo() {
+    log_info "Building Zellij ${ZELLIJ_VERSION} from source (this may take a few minutes)..."
+    cargo install zellij --version "${ZELLIJ_CARGO_VERSION}" --locked
+
+    ensure_local_bin
+    if [[ -f "${HOME}/.cargo/bin/zellij" ]]; then
+        cp -f "${HOME}/.cargo/bin/zellij" "${HOME}/.local/bin/zellij"
+    fi
+
+    verify_installation zellij "Zellij"
+}
+
+install_zellij_binary() {
+    local arch
+    arch=$(uname -m)
+
+    case "$arch" in
+        x86_64) arch="x86_64-unknown-linux-musl" ;;
+        aarch64) arch="aarch64-unknown-linux-musl" ;;
+        *)
+            log_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+
+    local filename="zellij-${arch}.tar.gz"
+    local download_url="https://github.com/zellij-org/zellij/releases/download/${ZELLIJ_VERSION}/${filename}"
+
+    log_info "Downloading Zellij ${ZELLIJ_VERSION} prebuilt binary (${arch})..."
+
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    local original_dir
+    original_dir=$(pwd)
+
+    cd "$temp_dir"
+
+    if ! download_file "$download_url" "$filename"; then
+        log_error "Failed to download zellij"
+        cd "$original_dir"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    log_info "Extracting Zellij..."
+    tar -xzf "$filename"
+
+    if [[ -f "zellij" ]]; then
+        chmod +x "zellij"
+        ensure_local_bin
+        mv "zellij" "${HOME}/.local/bin/zellij"
+        log_info "Installed zellij to ${HOME}/.local/bin/"
+    else
+        log_error "Failed to find zellij binary in archive"
+        cd "$original_dir"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    cd "$original_dir"
+    rm -rf "$temp_dir"
+
+    verify_installation zellij "Zellij"
+}
+
+install_zellij() {
+    if check_command_exists zellij; then
+        local current_version
+        current_version=$(zellij --version 2>&1 || echo "unknown")
+        log_info "Zellij is already installed: $current_version"
+
+        if ! prompt_yes_no_auto "Reinstall zellij anyway?" "n"; then
+            log_info "Skipping zellij installation"
+            return 0
+        fi
+    fi
+
+    if ensure_cargo 2>/dev/null; then
+        log_info "Rust toolchain found, building from source..."
+        install_zellij_cargo
+    else
+        log_info "No Rust toolchain found, downloading prebuilt binary..."
+        log_warning "Prebuilt binary may have library compatibility issues on some systems"
+        install_zellij_binary
+    fi
+}
+
+sync_zellij_config() {
+    log_info "Setting up Zellij configuration..."
+    ensure_dir "$(dirname "$ZELLIJ_CONFIG")"
+
+    if [[ ! -f "$REPO_CONFIG" && -f "$ZELLIJ_CONFIG" ]]; then
+        copy_config_to_repo "$ZELLIJ_CONFIG" "$REPO_CONFIG" >/dev/null || true
+    fi
+
+    if [[ ! -f "$REPO_CONFIG" ]]; then
+        ensure_parent_dir "$REPO_CONFIG"
+        touch "$REPO_CONFIG"
+        log_info "Created repo config placeholder: $REPO_CONFIG"
+    fi
+
+    create_symlink "$REPO_CONFIG" "$ZELLIJ_CONFIG"
+}
+
+main() {
+    parse_common_args "$@"
+
+    if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+        ZELLIJ_VERSION="${POSITIONAL_ARGS[0]}"
+    fi
+
+    log_step "Installing Zellij ${ZELLIJ_VERSION} (terminal multiplexer)"
+
+    if [[ "$DO_INSTALL" -eq 1 ]]; then
+        install_zellij
+    else
+        log_info "Skipping zellij binary installation (--config-only/--skip-install)"
+    fi
+
+    if [[ "$DO_SYNC" -eq 1 ]]; then
+        sync_zellij_config
+    else
+        log_info "Skipping Zellij config sync (--skip-config)"
+    fi
+
+    echo ""
+    log_success "Zellij installation and configuration complete"
+    if check_command_exists zellij; then
+        log_info "Zellij binary: $(which zellij)"
+    fi
+    log_info "Config location: $ZELLIJ_CONFIG (linked to $REPO_CONFIG)"
+    echo ""
+    log_info "Run 'zellij' to start a new session"
+    echo ""
+}
+
+main "$@"
+```
+
+#### 透過套件管理器
+
+```bash
+# macOS
+brew install zellij
+
+# Ubuntu/Debian
+cargo install zellij
+
+# Arch Linux
+pacman -S zellij
+```
+
+---
+
+## tmux
+
+tmux 是最廣泛採用的終端機多工器，自 2007 年以來持續發展。它使用自訂設定 DSL，支援透過 shell 指令碼進行廣泛的腳本化操作。
+
+### 主要功能
+
+- **工作階段管理** — 連線、分離和切換工作階段
+- **視窗和窗格** — 將終端機分割為多個窗格和視窗
+- **腳本化** — 完整的命令列介面用於自動化
+- **狀態列** — 高度可自訂的狀態行
+- **剪貼簿整合** — 支援系統剪貼簿的複製模式
+
+### 快速開始
+
+```bash
+# 啟動新工作階段
+tmux new -s myproject
+
+# 連線到現有工作階段
+tmux attach -t myproject
+
+# 列出工作階段
+tmux list-sessions
+```
+
+### 預設按鍵綁定
+
+| 按鍵 | 操作 |
+| :--- | :--- |
+| `Ctrl+b` | 前綴鍵 |
+| `Ctrl+b` 然後 `c` | 新增視窗 |
+| `Ctrl+b` 然後 `%` | 垂直分割 |
+| `Ctrl+b` 然後 `"` | 水平分割 |
+| `Ctrl+b` 然後方向鍵 | 在窗格間切換 |
+| `Ctrl+b` 然後 `d` | 分離工作階段 |
+
+### 安裝
+
+```bash
+# macOS
+brew install tmux
+
+# Ubuntu/Debian
+sudo apt install tmux
+
+# Arch Linux
+pacman -S tmux
+
+# 從原始碼編譯
+git clone https://github.com/tmux/tmux.git
+cd tmux
+sh autogen.sh
+./configure && make && sudo make install
+```
+
+---
+
+## dtach
+
+dtach 是一個極簡程式，模擬 tmux 或 screen 的分離功能。它包裝單個程序，允許分離和重新連線，無工作階段管理或多工開銷。
+
+### 主要功能
+
+- **程序連線/分離** — 連線和分離單個執行中的程序
+- **最小體積** — ~30 KB 執行檔，無設定檔
+- **零相依** — 純 C 編寫，無外部函式庫
+- **快速啟動** — 幾乎即時的 Socket 建立
+
+### 快速開始
+
+```bash
+# 啟動一個 shell socket
+dtach -A /tmp/my_socket
+
+# 啟動一個執行特定指令的 socket
+dtach -A /tmp/build_socket make build
+
+# 重新連線到現有 socket
+dtach -a /tmp/my_socket
+```
+
+### 命令參數
+
+| 參數 | 說明 |
+| :--- | :--- |
+| `-A` | 建立或連線到 Socket |
+| `-a` | 連線到現有 Socket（不存在則失敗） |
+| `-c` | 建立新 Socket（不連線） |
+| `-z` | 抑制建立訊息 |
+| `-r` | 以唯讀模式連線 |
+| `-e` | 指定跳脫字元（預設：`^\\`） |
+
+### 安裝
+
+```bash
+# Ubuntu/Debian
+sudo apt install dtach
+
+# Arch Linux
+pacman -S dtach
+
+# macOS
+brew install dtach
+
+# 從原始碼編譯
+git clone https://github.com/crigertyp/dtach.git
+cd dtach
+./configure && make && sudo make install
+```
