@@ -1,0 +1,369 @@
+---
+sidebar_position: 9
+title: Terminal Multiplexers
+description: Comparison of Zellij, tmux, and dtach — terminal session management tools for SSH workflows and persistent sessions.
+---
+
+# Terminal Multiplexers
+
+Terminal multiplexers allow managing multiple terminal sessions from a single window, detaching and reattaching across SSH connections, and keeping processes running after network disconnections.
+
+---
+
+## Comparison
+
+| Dimension | Zellij | tmux | dtach |
+| :--- | :--- | :--- | :--- |
+| **Language** | Rust | C | C |
+| **Configuration** | KDL (human-readable) | tmux.conf (DSL) | Minimal CLI flags |
+| **Layout System** | Built-in floating/stacked panes | Manual split management | No layout support |
+| **Session Management** | Full (list/attach/kill) | Full (list/attach/kill) | None (single process only) |
+| **Plugin System** | WASM-based plugins | Script-based extensions | None |
+| **Learning Curve** | Low (intuitive UI) | Medium (config-heavy) | Very Low |
+| **Default Status Bar** | Yes (informative) | Yes (customizable) | None |
+| **Multiplexing** | Full (panes, tabs, layouts) | Full (panes, windows) | None (single process only) |
+| **Active Development** | Yes | Yes | Maintenance mode |
+| **Binary Size** | ~15 MB | ~4 MB | ~30 KB |
+
+### When to Use Each
+
+- **Zellij** — Recommended for new projects. Intuitive keybindings, built-in layout management, and WASM plugin support make it the most productive choice for modern workflows.
+- **tmux** — Established standard with vast ecosystem. Prefer when working with teams that already use tmux or when existing configs/scripts depend on it.
+- **dtach** — Minimal process detach/reattach without multiplexing. Use when you only need to keep a single process (e.g., a long-running build or dev server) running after you log out, and don't need pane management or session switching.
+
+---
+
+## Zellij
+
+Zellij is a modern terminal multiplexer written in Rust, designed for ergonomics and ease of use. Its default keybindings are discoverable via a floating help pane.
+
+### Key Features
+
+- **Session management** — Create, attach, detach, and kill sessions
+- **Layouts** — Save and restore complex pane arrangements as named layouts
+- **Floating panes** — Overlay panes on top of the tiled layout
+- **Stacked panes** — Stack panes in a single region for quick switching
+- **WASM plugins** — Extend functionality with WebAssembly plugins
+
+### Quick Start
+
+```bash
+# Start a new named session
+zellij --session myproject
+
+# Attach to an existing session
+zellij attach myproject
+
+# List active sessions
+zellij list-sessions
+```
+
+### Keybindings (Default)
+
+| Key | Action |
+| :--- | :--- |
+| `Ctrl+t` | Prefix key (all keybindings start with this) |
+| `Ctrl+t` then `n` | New pane |
+| `Ctrl+t` then `←/→/↑/↓` | Navigate between panes |
+| `Ctrl+t` then `d` | Detach session |
+| `Ctrl+t` then `x` | Close pane |
+| `Ctrl+t` then `?` | Toggle floating help pane |
+
+### Installation
+
+#### Via Installer Script
+
+The following script builds from source (Rust toolchain required) and falls back to prebuilt binaries:
+
+```bash
+#!/usr/bin/env bash
+
+# Zellij Installation Script
+# Builds from source via cargo install, falls back to prebuilt binary
+
+set -euo pipefail
+
+# Source common functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+
+# Configuration
+ZELLIJ_VERSION="v0.44.3"
+ZELLIJ_CARGO_VERSION="0.44.3"
+ZELLIJ_CONFIG="${HOME}/.config/zellij/config.kdl"
+REPO_ROOT="$(get_repo_path)"
+REPO_CONFIG="${REPO_ROOT}/.config/zellij/config.kdl"
+AUTO_YES=0
+DO_INSTALL=1
+DO_SYNC=1
+
+ensure_cargo() {
+    if [[ -f "${HOME}/.cargo/env" ]]; then
+        source "${HOME}/.cargo/env"
+    fi
+    check_command_exists cargo
+}
+
+install_zellij_cargo() {
+    log_info "Building Zellij ${ZELLIJ_VERSION} from source (this may take a few minutes)..."
+    cargo install zellij --version "${ZELLIJ_CARGO_VERSION}" --locked
+
+    ensure_local_bin
+    if [[ -f "${HOME}/.cargo/bin/zellij" ]]; then
+        cp -f "${HOME}/.cargo/bin/zellij" "${HOME}/.local/bin/zellij"
+    fi
+
+    verify_installation zellij "Zellij"
+}
+
+install_zellij_binary() {
+    local arch
+    arch=$(uname -m)
+
+    case "$arch" in
+        x86_64) arch="x86_64-unknown-linux-musl" ;;
+        aarch64) arch="aarch64-unknown-linux-musl" ;;
+        *)
+            log_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+
+    local filename="zellij-${arch}.tar.gz"
+    local download_url="https://github.com/zellij-org/zellij/releases/download/${ZELLIJ_VERSION}/${filename}"
+
+    log_info "Downloading Zellij ${ZELLIJ_VERSION} prebuilt binary (${arch})..."
+
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    local original_dir
+    original_dir=$(pwd)
+
+    cd "$temp_dir"
+
+    if ! download_file "$download_url" "$filename"; then
+        log_error "Failed to download zellij"
+        cd "$original_dir"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    log_info "Extracting Zellij..."
+    tar -xzf "$filename"
+
+    if [[ -f "zellij" ]]; then
+        chmod +x "zellij"
+        ensure_local_bin
+        mv "zellij" "${HOME}/.local/bin/zellij"
+        log_info "Installed zellij to ${HOME}/.local/bin/"
+    else
+        log_error "Failed to find zellij binary in archive"
+        cd "$original_dir"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    cd "$original_dir"
+    rm -rf "$temp_dir"
+
+    verify_installation zellij "Zellij"
+}
+
+install_zellij() {
+    if check_command_exists zellij; then
+        local current_version
+        current_version=$(zellij --version 2>&1 || echo "unknown")
+        log_info "Zellij is already installed: $current_version"
+
+        if ! prompt_yes_no_auto "Reinstall zellij anyway?" "n"; then
+            log_info "Skipping zellij installation"
+            return 0
+        fi
+    fi
+
+    if ensure_cargo 2>/dev/null; then
+        log_info "Rust toolchain found, building from source..."
+        install_zellij_cargo
+    else
+        log_info "No Rust toolchain found, downloading prebuilt binary..."
+        log_warning "Prebuilt binary may have library compatibility issues on some systems"
+        install_zellij_binary
+    fi
+}
+
+sync_zellij_config() {
+    log_info "Setting up Zellij configuration..."
+    ensure_dir "$(dirname "$ZELLIJ_CONFIG")"
+
+    if [[ ! -f "$REPO_CONFIG" && -f "$ZELLIJ_CONFIG" ]]; then
+        copy_config_to_repo "$ZELLIJ_CONFIG" "$REPO_CONFIG" >/dev/null || true
+    fi
+
+    if [[ ! -f "$REPO_CONFIG" ]]; then
+        ensure_parent_dir "$REPO_CONFIG"
+        touch "$REPO_CONFIG"
+        log_info "Created repo config placeholder: $REPO_CONFIG"
+    fi
+
+    create_symlink "$REPO_CONFIG" "$ZELLIJ_CONFIG"
+}
+
+main() {
+    parse_common_args "$@"
+
+    if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+        ZELLIJ_VERSION="${POSITIONAL_ARGS[0]}"
+    fi
+
+    log_step "Installing Zellij ${ZELLIJ_VERSION} (terminal multiplexer)"
+
+    if [[ "$DO_INSTALL" -eq 1 ]]; then
+        install_zellij
+    else
+        log_info "Skipping zellij binary installation (--config-only/--skip-install)"
+    fi
+
+    if [[ "$DO_SYNC" -eq 1 ]]; then
+        sync_zellij_config
+    else
+        log_info "Skipping Zellij config sync (--skip-config)"
+    fi
+
+    echo ""
+    log_success "Zellij installation and configuration complete"
+    if check_command_exists zellij; then
+        log_info "Zellij binary: $(which zellij)"
+    fi
+    log_info "Config location: $ZELLIJ_CONFIG (linked to $REPO_CONFIG)"
+    echo ""
+    log_info "Run 'zellij' to start a new session"
+    echo ""
+}
+
+main "$@"
+```
+
+#### Via Package Manager
+
+```bash
+# macOS
+brew install zellij
+
+# Ubuntu/Debian
+cargo install zellij
+
+# Arch Linux
+pacman -S zellij
+```
+
+---
+
+## tmux
+
+tmux is the most widely adopted terminal multiplexer, established since 2007. It uses a custom configuration DSL and supports extensive scripting via shell commands.
+
+### Key Features
+
+- **Session management** — Attach, detach, and switch between sessions
+- **Windows and panes** — Split terminal into multiple panes and windows
+- **Scriptable** — Full command-line interface for automation
+- **Status bar** — Highly customizable status line
+- **Clipboard integration** — Copy mode with system clipboard support
+
+### Quick Start
+
+```bash
+# Start a new session
+tmux new -s myproject
+
+# Attach to existing session
+tmux attach -t myproject
+
+# List sessions
+tmux list-sessions
+```
+
+### Keybindings (Default)
+
+| Key | Action |
+| :--- | :--- |
+| `Ctrl+b` | Prefix key |
+| `Ctrl+b` then `c` | New window |
+| `Ctrl+b` then `%` | Split vertically |
+| `Ctrl+b` then `"` | Split horizontally |
+| `Ctrl+b` then `Arrow` | Navigate pane |
+| `Ctrl+b` then `d` | Detach session |
+
+### Installation
+
+```bash
+# macOS
+brew install tmux
+
+# Ubuntu/Debian
+sudo apt install tmux
+
+# Arch Linux
+pacman -S tmux
+
+# Build from source
+git clone https://github.com/tmux/tmux.git
+cd tmux
+sh autogen.sh
+./configure && make && sudo make install
+```
+
+---
+
+## dtach
+
+dtach is a minimal program that emulates the detach feature of tmux or screen. It wraps a single process and allows you to detach and reattach to it, without any session management or multiplexing overhead.
+
+### Key Features
+
+- **Process attach/detach** — Attach and detach a single running process
+- **Minimal footprint** — ~30 KB binary, no configuration files
+- **Zero dependencies** — Pure C, no external libraries
+- **Fast startup** — Nearly instant socket creation
+
+### Quick Start
+
+```bash
+# Start a socket with a shell
+dtach -A /tmp/my_socket
+
+# Start a socket running a specific command
+dtach -A /tmp/build_socket make build
+
+# Reattach to existing socket
+dtach -a /tmp/my_socket
+```
+
+### Command Flags
+
+| Flag | Description |
+| :--- | :--- |
+| `-A` | Create or attach to a socket |
+| `-a` | Attach to an existing socket (fail if none exists) |
+| `-c` | Create a new socket (don't attach) |
+| `-z` | Suppress creation messages |
+| `-r` | Attach in read-only mode |
+| `-e` | Specify escape character (default: `^\\`) |
+
+### Installation
+
+```bash
+# Ubuntu/Debian
+sudo apt install dtach
+
+# Arch Linux
+pacman -S dtach
+
+# macOS
+brew install dtach
+
+# Build from source
+git clone https://github.com/crigertyp/dtach.git
+cd dtach
+./configure && make && sudo make install
+```
