@@ -1,3 +1,4 @@
+
 # LangChain Framework
 
 LangChain is a toolkit for building LLM-powered applications. It handles prompts, memory, document search (RAG), tool calling, and multi‑agent workflows – integrated with `uv` for fast, reproducible Python environments.
@@ -6,7 +7,7 @@ LangChain is a toolkit for building LLM-powered applications. It handles prompts
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.10+
 - `uv` ([install](https://docs.astral.sh/uv/))
 - OpenAI API key (or other LLM provider)
 
@@ -55,9 +56,12 @@ langchain-project/
 ```bash
 uv add langchain-core langchain-openai langchain-community
 uv add langchain-chroma langchain-text-splitters langsmith
+uv add langgraph fastapi uvicorn langgraph-supervisor
 uv add --dev pytest ruff mypy
 uv sync
 ```
+
+> **Note:** `langgraph-supervisor` is an additional package for multi‑agent supervisor patterns.
 
 ---
 
@@ -151,10 +155,14 @@ vectorstore = Chroma.from_documents(chunks, embeddings, persist_directory="./chr
 retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 ```
 
-**4. Build RAG chain**
+**4. Build RAG chain** (with a string input for easy streaming)
 
 ```python
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
+
+model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 def format_docs(docs):
     return "\n\n".join(d.page_content for d in docs)
@@ -165,8 +173,9 @@ Question: {question}
 Answer:
 """)
 
+# The chain now accepts a plain string as input (the question)
 rag_chain = (
-    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    {"context": retriever | format_docs, "question": lambda x: x}
     | rag_prompt
     | model
     | StrOutputParser()
@@ -182,6 +191,8 @@ answer = rag_chain.invoke("What is the loan period?")
 | `chunk_size` | 400–800 tokens | Larger = more context but more noise |
 | `chunk_overlap` | 10–20% of size | Prevents broken sentences |
 | `k` | 3–5 | More chunks = more variety, risk of distraction |
+
+> **Note:** `RecursiveCharacterTextSplitter` uses characters, not tokens. Adjust `chunk_size` accordingly (e.g., 500–1000 characters for ~400–800 tokens).
 
 ---
 
@@ -208,31 +219,48 @@ Memory preserves conversation history across turns. Without memory, LLM APIs are
 ### Example (Buffer Memory)
 
 ```python
-from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_openai import ChatOpenAI
 
+# Define the model
+model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+# Prompt with a MessagesPlaceholder for history
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant."),
+    MessagesPlaceholder(variable_name="history"),
+    ("human", "{input}")
+])
+
+chain = prompt | model | StrOutputParser()
+
+# In‑memory session store
 store = {}
 
-def get_session_history(session_id):
+def get_session_history(session_id: str):
     if session_id not in store:
         store[session_id] = InMemoryChatMessageHistory()
     return store[session_id]
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an assistant. History: {history}"),
-    ("human", "{input}")
-])
-
-chain = prompt | model | parser
-chain_with_memory = RunnableWithMessageHistory(
-    chain, get_session_history,
+# Wrap the chain with history management
+chain_with_history = RunnableWithMessageHistory(
+    chain,
+    get_session_history,
     input_messages_key="input",
     history_messages_key="history"
 )
 
-response = chain_with_memory.invoke(
+response = chain_with_history.invoke(
     {"input": "My name is Alice"},
-    config={"configurable": {"session_id": "user123"}}
+    config={"configurable": {"session_id": "user1"}}
+)
+
+response2 = chain_with_history.invoke(
+    {"input": "What's my name?"},
+    config={"configurable": {"session_id": "user1"}}
 )
 ```
 
@@ -258,6 +286,7 @@ def search_catalog(title: str) -> str:
 ```python
 from langgraph.prebuilt import create_react_agent
 
+# Assuming `model` is already defined (e.g., ChatOpenAI)
 agent = create_react_agent(
     model=model,
     tools=[search_catalog],
@@ -301,6 +330,7 @@ app = graph.compile()
 ### Supervisor‑Workers (Multi‑Agent)
 
 ```python
+# Requires: uv add langgraph-supervisor
 from langgraph_supervisor import create_supervisor
 from langgraph.prebuilt import create_react_agent
 
@@ -327,7 +357,7 @@ os.environ["LANGCHAIN_API_KEY"] = "lsv2_..."
 os.environ["LANGCHAIN_PROJECT"] = "my_project"
 ```
 
-After setup, every `.invoke()` is traced. View at [smith.langchain.com](https://smith.langchain.com).
+After setup, every `.invoke()` is automatically traced. View at [smith.langchain.com](https://smith.langchain.com).
 
 ---
 
@@ -345,7 +375,7 @@ After setup, every `.invoke()` is traced. View at [smith.langchain.com](https://
 | Problem | Cause | Fix |
 |---------|-------|-----|
 | `invoke` returns `AIMessage` | Missing output parser | Add `\| StrOutputParser()` |
-| Memory not working | No `{history}` in prompt | Include `{history}` placeholder |
+| **Memory not working** | **Mismatched or missing history key** | **Match `history_messages_key` with your `MessagesPlaceholder(variable_name="...")`** |
 | Agent loops forever | No iteration limit | Set `recursion_limit` |
 | High token usage | `chunk_size` too large | Reduce to 400–600 |
 
@@ -375,6 +405,7 @@ chain.batch(inputs, config={"max_concurrency": 5})
 
 ```python
 from fastapi import FastAPI, Query
+from fastapi.responses import StreamingResponse
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -383,7 +414,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-loader = TextLoader("langchain_guide.md")
+# ----- Load and index your document -----
+loader = TextLoader("langchain_guide.txt")
 docs = loader.load()
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 chunks = splitter.split_documents(docs)
@@ -401,27 +433,21 @@ Question: {question}
 Answer:
 """)
 model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+# Chain that accepts a plain string as input
 rag_chain = (
-    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    {"context": retriever | format_docs, "question": lambda x: x}
     | prompt
     | model
     | StrOutputParser()
 )
 
+# ----- FastAPI app -----
 app = FastAPI()
 
 @app.get("/ask")
 async def ask(question: str = Query(...)):
     return {"answer": rag_chain.invoke(question)}
-```
-
-Run: `uv run uvicorn api:app --reload --port 8000`  
-Test: `curl "http://localhost:8000/ask?question=What%20is%20LCEL?"`
-
-### Streaming Endpoint
-
-```python
-from fastapi.responses import StreamingResponse
 
 @app.get("/ask/stream")
 async def ask_stream(question: str):
@@ -431,11 +457,13 @@ async def ask_stream(question: str):
     return StreamingResponse(generate(), media_type="text/plain")
 ```
 
+Run: `uv run uvicorn api:app --reload --port 8000`  
+Test: `curl "http://localhost:8000/ask?question=What%20is%20LCEL?"`
+
 ### Deployment Notes
 
-- Replace local Chroma with persistent store (PGVector, Pinecone) for production.
+- Replace local Chroma with a persistent vector store (PGVector, Pinecone) for production.
 - Add authentication and rate limiting for public APIs.
 - Deploy to Render, Railway, Fly.io, or a VPS.
 
 ---
-
