@@ -1,9 +1,7 @@
-
 # LangChain Framework
 
 LangChain is a toolkit for building applications powered by large language models (LLMs).  
 It handles prompts, memory, document search (RAG), and tool calling – all integrated with `uv` for fast, reproducible Python environments.
-
 
 ---
 
@@ -15,7 +13,7 @@ It handles prompts, memory, document search (RAG), and tool calling – all inte
 
 ---
 
-## 1.1 Core Architecture
+## Core Architecture
 
 LangChain separates execution, integration, and observability into layers.
 
@@ -26,7 +24,7 @@ LangChain separates execution, integration, and observability into layers.
 | Integrations | `langchain-community` | Third‑party models, vector stores, loaders | `Chroma`, `ChatOpenAI`, `PyPDFLoader` |
 | Observability | `LangSmith` | Tracing, cost monitoring, evaluation | Automated trace injection |
 
-### 1.1.1 Component Roles
+### Component Roles
 
 | Component | Language | Purpose |
 |-----------|----------|---------|
@@ -37,7 +35,7 @@ LangChain separates execution, integration, and observability into layers.
 
 ---
 
-## 1.2 Project Structure (uv)
+## Project Structure (uv)
 
 Use `uv` to manage dependencies and `src/` layout.
 
@@ -66,17 +64,16 @@ uv add --dev pytest ruff mypy
 uv sync
 ```
 
-
 ---
 
-## 1.3 LCEL – LangChain Expression Language
+## LCEL – LangChain Expression Language
 
 LCEL uses the pipe operator `|` to chain components.
 
 **Execution flow:**  
 `Input → Prompt → Model → Parser → Output`
 
-### 1.3.1 Runnable Methods
+### Runnable Methods
 
 | Method | Async | Behaviour |
 |--------|-------|-----------|
@@ -84,7 +81,7 @@ LCEL uses the pipe operator `|` to chain components.
 | `stream(input)` | `astream` | Yields tokens as they arrive |
 | `batch([inputs])` | `abatch` | Parallel processing |
 
-### 1.3.2 Basic Chain Example
+### Basic Chain Example
 
 ```python
 from langchain_core.prompts import ChatPromptTemplate
@@ -101,7 +98,7 @@ chain = prompt | model | parser
 answer = chain.invoke({"question": "What is RAG?"})
 ```
 
-### 1.3.3 Flow Helpers
+### Flow Helpers
 
 | Helper | Purpose |
 |--------|---------|
@@ -120,13 +117,13 @@ pipeline = RunnableParallel(
 
 ---
 
-## 1.4 RAG – Retrieval-Augmented Generation
+## RAG – Retrieval-Augmented Generation
 
 RAG allows answering from private documents. Pipeline:
 
 `Load → Split → Embed → Store → Retrieve → Generate`
 
-### 1.4.1 Implementation Steps
+### Implementation Steps
 
 **1. Load documents**
 
@@ -181,7 +178,7 @@ rag_chain = (
 answer = rag_chain.invoke("What is the loan period?")
 ```
 
-### 1.4.2 Tuning Guide
+### Tuning Guide
 
 | Parameter | Recommended | Trade‑off |
 |-----------|-------------|------------|
@@ -191,7 +188,7 @@ answer = rag_chain.invoke("What is the loan period?")
 
 ---
 
-## 1.5 Memory & State Management
+## Memory & State Management
 
 Memory keeps conversation history across turns.
 
@@ -230,11 +227,11 @@ response = chain_with_memory.invoke(
 
 ---
 
-## 1.6 Tools & Agents
+## Tools & Agents
 
 Tools let the LLM call external functions. Agents decide when and how to call them.
 
-### 1.6.1 Define a Tool
+### Define a Tool
 
 ```python
 from langchain_core.tools import tool
@@ -245,7 +242,7 @@ def search_catalog(title: str) -> str:
     return f"{title} found on shelf A12."
 ```
 
-### 1.6.2 Create an Agent
+### Create an Agent
 
 ```python
 from langgraph.prebuilt import create_react_agent
@@ -264,11 +261,11 @@ print(result["messages"][-1].content)
 
 ---
 
-## 1.7 LangGraph – Complex Workflows
+## LangGraph – Complex Workflows
 
 LangGraph handles loops, conditional branching, and multi‑agent coordination.
 
-### 1.7.1 Simple State Graph
+### Simple State Graph
 
 ```python
 from langgraph.graph import StateGraph, END
@@ -290,7 +287,7 @@ graph.add_edge("router", END)
 app = graph.compile()
 ```
 
-### 1.7.2 Supervisor‑Workers (Multi‑Agent)
+### Supervisor‑Workers (Multi‑Agent)
 
 ```python
 from langgraph_supervisor import create_supervisor
@@ -308,7 +305,7 @@ supervisor = create_supervisor(
 
 ---
 
-## 1.8 LangSmith – Tracing & Debugging
+## LangSmith – Tracing & Debugging
 
 LangSmith records every execution step – essential for debugging.
 
@@ -325,16 +322,16 @@ After this, every `.invoke()` is automatically traced. View traces in the [LangS
 
 ---
 
-## 1.9 Best Practices & Pitfalls
+## Best Practices & Pitfalls
 
-### 1.9.1 Safety Rules
+### Safety Rules
 
 1. **Use `temperature=0`** for tool calling and routing.
 2. **Set recursion limits** to prevent infinite loops: `recursion_limit=10`.
 3. **Never use f‑strings** to build prompts from user input (risk of injection).
 4. **Always bound `k` in retrievers**: `search_kwargs={"k": 3}`.
 
-### 1.9.2 Common Issues
+### Common Issues
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
@@ -343,7 +340,7 @@ After this, every `.invoke()` is automatically traced. View traces in the [LangS
 | Agent loops forever | No iteration limit | Set `recursion_limit` |
 | High token usage | `chunk_size` too large | Reduce to 400–600 |
 
-### 1.9.3 Production Quality Gates
+### Production Quality Gates
 
 ```python
 # Safe model settings
@@ -352,6 +349,3 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=2, timeout=15)
 # Controlled batch concurrency
 chain.batch(inputs, config={"max_concurrency": 5})
 ```
-
----
-
