@@ -1,0 +1,353 @@
+---
+sidebar_position: 4
+title: vLLM Experimentation and Findings
+description: Benchmark workflow, logs, metrics, and findings from vLLM AWQ 4B testing on one RTX 2080 Ti.
+---
+
+# vLLM Experimentation and Findings
+
+This page documents the benchmark workflow, logs, results, and explanations from the one-GPU RTX 2080 Ti vLLM test. LLM inference theory is covered in [LLM Inference Principles](./llm-inference-principles), and serving setup is covered in [vLLM Setup](./vllm-setup).
+
+## Test Scope
+
+| Item | Value |
+| :--- | :--- |
+| GPU | NVIDIA GeForce RTX 2080 Ti |
+| VRAM | About 11 GB |
+| Serving framework | vLLM |
+| Model | `QuantTrio/Qwen3.5-4B-AWQ` |
+| Base model | `Qwen/Qwen3.5-4B` |
+| Benchmark data | Synthetic random prompts |
+| Benchmark command family | `vllm bench serve` |
+| vLLM dtype | `float16` |
+
+:::caution[Scope]
+These are infrastructure benchmark results from synthetic random prompts. They show serving behaviour for controlled input/output lengths, not product quality or production readiness.
+:::
+
+:::note[Why `float16` was used]
+The tests used `--dtype float16` because the RTX 2080 Ti is a Turing-generation GPU with compute capability 7.5. This hardware path does not have the same `bfloat16` support assumptions as newer data-centre GPUs, so `float16` was the safer explicit dtype for this benchmark setup.
+:::
+
+## Metrics Used in Comparisons
+
+| Metric | Meaning | How it was used in the benchmark comparison |
+| :--- | :--- | :--- |
+| Mean TTFT | Average time to first token. | Compared across input-length, concurrency, and context ladders to show prefill and queueing cost. |
+| P99 TTFT | Near-worst-case time to first token. | Used to expose tail-latency spikes that the mean can hide. |
+| Mean TPOT | Average time per output token after generation starts. | Compared across runs to show whether per-request decode became slower. |
+| P99 TPOT | Near-worst-case time per output token. | Used to check whether decode latency became unstable under heavier load. |
+| Output tokens/s | Aggregate output token throughput across the benchmark. | Compared against TTFT and TPOT to show the throughput/latency trade-off. |
+| Observed VRAM and KV-cache capacity | GPU memory used by vLLM and the KV-cache capacity reported in logs. | Used mainly in context-length and memory-utilisation comparisons. |
+| Failures | Failed benchmark requests. | Used as the basic stability check for each tested shape. |
+
+## Benchmark Workflow
+
+Per-run variables made the result directories and benchmark files self-describing:
+
+```bash
+export MAX_MODEL_LEN=2048
+export MAX_NUM_SEQS=1
+export MAX_NUM_BATCHED_TOKENS=2048
+export RANDOM_INPUT_LEN=1024
+export RANDOM_OUTPUT_LEN=128
+export MAX_CONCURRENCY=1
+export GPU_MEMORY_UTILIZATION=0.82
+
+export RUN_CONFIG_ID="qwen3.5-4b-awq-vllm-rtx2080ti-len${MAX_MODEL_LEN}-seqs${MAX_NUM_SEQS}-btok${MAX_NUM_BATCHED_TOKENS}-i${RANDOM_INPUT_LEN}-o${RANDOM_OUTPUT_LEN}-c${MAX_CONCURRENCY}"
+export RUN_ID="${RUN_CONFIG_ID}-$(date +%Y%m%d-%H%M%S)"
+export RESULT_DIR="$WORKDIR/results/$RUN_ID"
+export BENCH_FILE="$RESULT_DIR/bench-${RUN_CONFIG_ID}.txt"
+mkdir -p "$RESULT_DIR"
+```
+
+The benchmark ran inside the vLLM container and targeted the OpenAI-compatible chat endpoint.
+
+```bash
+docker exec "$CONTAINER" vllm bench serve \
+  --backend openai-chat \
+  --endpoint /v1/chat/completions \
+  --model "$MODEL" \
+  --random-input-len "$RANDOM_INPUT_LEN" \
+  --random-output-len "$RANDOM_OUTPUT_LEN" \
+  --num-prompts 20 \
+  --max-concurrency "$MAX_CONCURRENCY" \
+  --ignore-eos \
+  | tee "$BENCH_FILE"
+```
+
+Synthetic random prompts were used because they avoid exposing company documents, customer data, credentials, or private code. They also make input and output lengths controllable, so `i1024/o128/c1` means the same basic workload shape across runs.
+
+The report does not claim that a separate smoke test was run. For this simple benchmarking pass, the benchmark output itself was the main evidence that the server was reachable, the API path worked, and the requests completed.
+
+:::note[Benchmark command notes]
+`--ignore-eos` tells the benchmark to ignore early end-of-sequence tokens so outputs stay closer to the requested `--random-output-len`. This makes TPOT and output-throughput comparisons cleaner across runs. It is a benchmark-control option, not necessarily a production serving policy.
+
+`tee "$BENCH_FILE"` prints the benchmark output to the terminal and writes the same output to the benchmark text file. This keeps the interactive run readable while preserving a copy for later reporting.
+:::
+
+## Artefact Capture
+
+Capture evidence after each run:
+
+```bash
+docker image inspect "$IMAGE" \
+  --format '{{index .RepoDigests 0}}' \
+  > "$RESULT_DIR/image-digest.txt"
+nvidia-smi -q > "$RESULT_DIR/nvidia-smi-final.txt"
+docker logs "$CONTAINER" > "$RESULT_DIR/server.log" 2>&1
+docker inspect "$CONTAINER" > "$RESULT_DIR/container-config.json"
+```
+
+`image-digest.txt` records the exact Docker image identity used for the run. This matters because tags such as `latest` can move between benchmark sessions.
+
+`grep` can be used to pull relevant lines out of long logs. For example:
+
+```bash
+grep -iE "kv cache|maximum concurrency|memory|gpu|oom|error" "$RESULT_DIR/server.log"
+```
+
+Explanation:
+
+- `grep` searches text files.
+- `-i` makes the search case-insensitive.
+- `-E` enables extended regular expressions.
+- The `|` characters mean "or", so this example finds lines containing any of
+  those keywords.
+
+
+## Repeat Workflow
+
+Use this loop for benchmark experiments:
+
+```text
+Set the current server-side limits.
+Start the vLLM container.
+Run the benchmark.
+Capture benchmark output, server logs, container config, GPU state, and image digest.
+Stop and remove the container.
+Change server-side limits if needed.
+Start a fresh container and benchmark again.
+```
+
+Stop and remove the container after capturing artefacts:
+
+```bash
+docker stop "$CONTAINER"
+docker rm "$CONTAINER"
+```
+
+This matters because `--max-model-len`, `--max-num-seqs`, `--max-num-batched-tokens`, and `--gpu-memory-utilization` are server startup choices. Changing those values requires a fresh vLLM server process. Benchmark-only values such as `--random-input-len`, `--random-output-len`, and `--max-concurrency` can change between benchmark commands, but the cleanest recorded process is still: benchmark, capture artefacts, stop, change limits, restart, benchmark again.
+
+:::tip[Change one serving dimension at a time]
+If context length, active sequences, memory utilisation, input length, and concurrency all change together, the result becomes hard to explain.
+:::
+
+## Code and Logs
+
+The experiment used three ladders:
+
+| Ladder | What changed | Why it was tested |
+| :--- | :--- | :--- |
+| Input length | `i128`, `i512`, `i1024`, `i1800` at concurrency 1. | Measures prefill growth under a 2048 context limit. |
+| Concurrency | `max-num-seqs` and benchmark concurrency 1, 2, 4, 8. | Measures batching, queueing, and aggregate throughput. |
+| Context length | 4096, 8192, 16384 max context at concurrency 1. | Measures long-context feasibility and VRAM pressure. |
+
+### Input-Length Ladder
+
+All runs below used `--max-model-len 2048`, `--max-num-seqs 1`, and `--max-num-batched-tokens 2048`.
+
+| Run | Input | Output | Output tok/s | Mean TTFT | P99 TTFT | Mean TPOT | P99 TPOT | Failures |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `i128/o64/c1` | 128 | 64 | 80.38 | 83.65 ms | 115.98 ms | 11.30 ms | 11.37 ms | 0 |
+| `i512/o128/c1` | 512 | 128 | 75.51 | 225.08 ms | 459.88 ms | 11.57 ms | 11.63 ms | 0 |
+| `i1024/o128/c1` | 1024 | 128 | 67.42 | 409.56 ms | 642.19 ms | 11.72 ms | 11.80 ms | 0 |
+| `i1800/o128/c1` | 1800 | 128 | 52.60 | 898.57 ms | 3272.90 ms | 12.08 ms | 12.19 ms | 0 |
+
+The useful baseline became `i1024/o128/c1`: it was long enough to expose prefill cost, but not so close to the 2048 context ceiling that every follow-up result became a stress test.
+
+### Concurrency Ladder
+
+The concurrency ladder used the same workload shape, `i1024/o128`, but restarted the server with matching active sequence limits:
+
+| Run | Server max seqs | Server max batched tokens | Benchmark concurrency |
+| :--- | ---: | ---: | ---: |
+| `c1` | 1 | 2048 | 1 |
+| `c2` | 2 | 2048 | 2 |
+| `c4` | 4 | 2048 | 4 |
+| `c8` | 8 | 2048 | 8 |
+
+Observed benchmark results:
+
+| Run | Output tok/s | Mean TTFT | P99 TTFT | Mean TPOT | P99 TPOT | Observed VRAM | Failures |
+| :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: |
+| `c1` | 67.42 | 409.56 ms | 642.19 ms | 11.72 ms | 11.80 ms | about 7564 MiB EngineCore | 0 |
+| `c2` | 90.36 | 1061.93 ms | 5498.17 ms | 13.94 ms | 16.83 ms | not recorded by `nvidia-smi`; server log captured | 0 |
+| `c4` | 120.90 | 2088.08 ms | 6234.20 ms | 16.88 ms | 23.11 ms | 8258 MiB EngineCore | 0 |
+| `c8` | 121.69 | 5342.70 ms | 9651.51 ms | 19.49 ms | 23.06 ms | 7846 MiB EngineCore | 0 |
+
+Relevant `c2` startup log facts:
+
+```text
+model: QuantTrio/Qwen3.5-4B-AWQ
+served model name: qwen35-4b-awq
+dtype: float16
+max model len: 2048
+max num seqs: 2
+max num batched tokens: 2048
+gpu memory utilisation setting: 0.82
+model loading memory: 5.63 GiB
+available KV cache memory: 0.43 GiB
+GPU KV cache size: 7,606 tokens
+maximum concurrency for 2,048 tokens/request: 3.71x
+```
+
+This means the server had enough KV-cache capacity for roughly 3.71 full 2048-token requests, but the scheduler was intentionally capped at 2 active sequences for the `c2` run.
+
+### Context Ladder
+
+The context ladder kept concurrency at 1 but increased context and input length.
+
+| Run | GPU memory setting | Input | Output | Output tok/s | Mean TTFT | P99 TTFT | Mean TPOT | P99 TPOT | VLLM memory | Total GPU used | Failures |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | :--- | ---: |
+| `len4096/i2048/o128/c1` | 0.82 | 2048 | 128 | 49.90 | 1012.67 ms | 3411.79 ms | 12.22 ms | 13.71 ms | 7826 MiB | 8119 MiB | 0 |
+| `len8192/i4096/o128/c1` | 0.90 | 4096 | 128 | 32.65 | 2251.16 ms | 4474.12 ms | 13.14 ms | 14.64 ms | 9136 MiB | 9431 MiB | 0 |
+| `len16384/i8192/o128/c1` | 0.90 | 8192 | 128 | 15.64 | 6272.26 ms | 8124.42 ms | 15.05 ms | 15.41 ms | 9876 MiB | 10171 MiB | 0 |
+
+Memory planning highlights:
+
+| Run | Available KV cache | GPU KV cache size | Max full-context concurrency estimate | Runtime KV usage |
+| :--- | ---: | ---: | ---: | ---: |
+| `len4096` | 0.38 GiB | 8,564 tokens | 2.09x for 4096-token requests | up to 36.4% |
+| `len8192` | 1.22 GiB | 32,336 tokens | 3.95x for 8192-token requests | up to 14.9% |
+| `len16384` | 1.07 GiB | 30,895 tokens | 1.89x for 16384-token requests | up to 29.2% |
+
+The 8192 and 16384 context shapes crashed at `--gpu-memory-utilization 0.82` and succeeded after using `0.90`. That makes them feasibility probes with less shared-server headroom, not comfortable default settings.
+
+The KV-cache rows are affected by both the context shape and the memory setting. Moving from `0.82` to `0.90` gives vLLM permission to reserve a larger fraction of the GPU for the model executor. After model weights, CUDA/runtime overhead, graph capture, and other reserved memory are accounted for, more of the remaining budget can become KV cache. This is why the 8192-context run reported 1.22 GiB of available KV cache and 32,336 GPU KV-cache tokens, much higher than the 4096-context run's 0.38 GiB and 8,564 tokens.
+
+The change does not make prefill or decode computation faster by itself. It mainly changes feasibility and memory planning: more KV blocks, a higher theoretical full-context concurrency estimate in some shapes, less free VRAM, and higher risk from other users' GPU processes or runtime spikes. The 16384 run used the same `0.90` setting as the 8192 run but still had slightly less available KV cache, 1.07 GiB, because the larger maximum context and profiling/runtime reservations left a different remainder for KV cache.
+
+The 16384 startup log also reported:
+
+```text
+vLLM version: 0.24.0
+quantization: auto_awq
+max model len: 16384
+max num seqs: 1
+max num batched tokens: 16384
+gpu memory utilisation setting: 0.90
+init engine time: 324.26 s
+multi-modal warmup completed: 22.244 s
+readonly multi-modal warmup completed: 2.295 s
+```
+
+Additional log notes:
+
+| Log signal | Meaning |
+| :--- | :--- |
+| FlashAttention 2 unsupported on RTX 2080 Ti | Expected because the card is compute capability 7.5, below the usual FA2 support floor. |
+| FlashInfer top-p/top-k unavailable on compute capability 7.5 | Expected hardware limitation and fallback signal. |
+| Triton JIT compilation during inference | Can cause latency spikes during early requests or uncommon shapes. |
+| Multimodal warmup occurred | The successful runs did not use `--language-model-only`, so the server profiled multimodal-related paths. |
+
+## Findings and Explanations
+
+### Longer Inputs Mainly Increased TTFT
+
+Input length increased from 128 to 1800 tokens while concurrency stayed at 1. Mean TTFT rose from 83.65 ms to 898.57 ms, and P99 TTFT rose from 115.98 ms to 3272.90 ms.
+
+This is expected because prefill must process the full prompt before the first output token appears. Longer prompts create more attention work and more KV-cache writes before the user sees any streamed output.
+
+TPOT stayed close to 11-12 ms in this ladder. That means decode remained comparatively stable. The main cost of longer input was waiting for the first token, not generating each later token.
+
+### Concurrency Increased Aggregate Output Tokens/s and Also Increased TTFT
+
+The concurrency ladder shows the central serving trade-off:
+
+| Move | Output tok/s change | Mean TTFT change | Interpretation |
+| :--- | :--- | :--- | :--- |
+| `c1` to `c2` | 67.42 to 90.36 | 409.56 ms to 1061.93 ms | Better GPU utilisation, but requests wait longer. |
+| `c2` to `c4` | 90.36 to 120.90 | 1061.93 ms to 2088.08 ms | More batching improves aggregate throughput again. |
+| `c4` to `c8` | 120.90 to 121.69 | 2088.08 ms to 5342.70 ms | Throughput saturates while queueing gets much worse. |
+
+The reason output tokens/s can rise while TTFT worsens is that the metric is aggregate. The GPU can process more active sequences together, so the benchmark receives more total output tokens per second. However, each request may wait behind other requests, and prefill work for multiple prompts competes for scheduler time.
+
+At `c8`, throughput was nearly flat compared with `c4`, but mean TTFT more than doubled. That means the one-GPU system had passed the useful batching point for this workload.
+
+### Concurrency Increased TPOT Because Per-Request Decode Got Slower
+
+Mean TPOT moved from 11.72 ms at `c1` to 19.49 ms at `c8`.
+
+This does not contradict the higher aggregate output tokens/s. It means each individual request received tokens more slowly, but the server produced tokens for more requests at the same time.
+
+Technically, higher concurrency increases scheduling pressure, KV-cache traffic, memory bandwidth pressure, and batch-shape overhead. On an 11 GB Turing GPU, these costs become visible quickly.
+
+### Longer Context Reduced Output Tokens/s Even at Concurrency 1
+
+In the context ladder, output throughput fell from 49.90 tokens/s at 4096 context to 15.64 tokens/s at 16384 context.
+
+This happened even though concurrency stayed at 1 because the prompt length also increased:
+
+| Context run | Input length | Mean TTFT | Mean TPOT | Output tok/s |
+| :--- | ---: | ---: | ---: | ---: |
+| `len4096` | 2048 | 1012.67 ms | 12.22 ms | 49.90 |
+| `len8192` | 4096 | 2251.16 ms | 13.14 ms | 32.65 |
+| `len16384` | 8192 | 6272.26 ms | 15.05 ms | 15.64 |
+
+Longer context means more prefill work and a larger attention history for generated tokens. TTFT grows strongly. TPOT also rises gradually because each new token attends over a longer sequence and the system is closer to memory and kernel efficiency limits.
+
+### Raising `gpu-memory-utilization` Helped Fit Longer Contexts but Reduced Headroom
+
+The 8192 and 16384 context runs did not succeed at `0.82`. They succeeded at `0.90`.
+
+This does not mean `0.90` made the model faster by itself. It allowed vLLM to reserve more GPU memory for the model executor and KV cache. That made the longer-context shapes fit, but it left less free VRAM for other processes or runtime spikes.
+
+The observed KV-cache differences should therefore not be read as a pure context-length comparison. The 4096 run used `0.82`, while the 8192 and 16384 runs used `0.90`. The higher memory setting increased the pool from which vLLM could allocate KV cache, which is why the 8192 run had a much larger reported KV-cache token capacity than the 4096 run despite having a larger context setting. At the same time, total GPU memory used rose from 8119 MiB at 4096 context to 9431 MiB at 8192 context and 10171 MiB at 16384 context.
+
+For the 16384-context run, total GPU memory used was 10171 MiB out of 11264 MiB, leaving only about 648 MiB free in the pasted `nvidia-smi` excerpt. That is a ceiling probe, not a comfortable operating point.
+
+### AWQ Solved Weight Memory Pressure, Not All Memory Pressure
+
+The FP16 4B path was too tight for the practical 11 GB memory envelope. Switching to AWQ reduced model weight memory enough to make the 4B benchmark path usable.
+
+However, AWQ does not remove:
+
+| Remaining pressure | Why it remains |
+| :--- | :--- |
+| KV cache | Long prompts, generated tokens, and concurrency still need attention state. |
+| Activations and workspace memory | Kernels still need runtime memory. |
+| CUDA graph or compilation overhead | Serving systems may reserve memory for optimised execution paths. |
+| Other GPU processes | Shared servers may already have small resident processes. |
+
+This is why a quantised model can load successfully but still become slow or unsafe at long context or high concurrency.
+
+## Practical Conclusions
+
+| Question | Answer from the recorded tests |
+| :--- | :--- |
+| Can AWQ 4B run on one RTX 2080 Ti? | Yes, for the tested synthetic shapes up to 16384 max context. |
+| Is 16384 context a good operating point? | No. It is a feasibility probe with low throughput, high TTFT, and tight VRAM. |
+| What was the best throughput point? | `len2048/i1024/o128/c4` at 120.90 output tokens/s. |
+| What was the gentler compromise? | `len2048/i1024/o128/c2` at 90.36 output tokens/s with lower TTFT than `c4` and `c8`. |
+| What should be watched first? | TTFT, then TPOT, then aggregate output tokens/s. |
+
+Recommended operating interpretation:
+
+| Shape | Recommendation |
+| :--- | :--- |
+| `c1` | Good baseline for understanding model behaviour. |
+| `c2` | Useful compromise for one-GPU testing. |
+| `c4` | Best tested aggregate throughput, but noticeably worse first-token latency. |
+| `c8` | Stress result; little throughput gain over `c4`. |
+| `len4096` | Feasible and near 50 output tokens/s at concurrency 1. |
+| `len8192` | Feasible at `0.90`, but below 50 output tokens/s. |
+| `len16384` | Feasible ceiling probe only. |
+
+:::tip[Decision rule]
+For the next experiment, pick one variable: context length, concurrency, input length, output length, memory utilisation, or model variant. The benchmark is useful only if the changed result can be explained.
+:::
+
+## References
+
+- [vLLM benchmark serve CLI](https://docs.vllm.ai/en/latest/cli/bench/serve/)
