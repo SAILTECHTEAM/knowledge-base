@@ -18,9 +18,6 @@ vLLM is an inference and serving engine designed for high-throughput LLM serving
 | Continuous batching | Requests are scheduled at iteration level. New requests can join as other requests finish, instead of waiting for a fixed batch to complete. | Improves aggregate throughput when request lengths differ. |
 | Prefill/decode scheduling | vLLM schedules prompt prefill and token-by-token decode work under limits such as `--max-num-seqs` and `--max-num-batched-tokens`. | Explains why higher concurrency can improve total output tokens/s while increasing TTFT and TPOT. |
 | Chunked prefill | Long prompts can be split across scheduling iterations when enabled and supported by the active configuration. | Helps avoid one long prompt monopolising the scheduler. |
-| Prefix caching | Shared prompt prefixes can be reused when requests have the same beginning. | Useful for chat templates, system prompts, and repeated retrieval prefixes. |
-| OpenAI-compatible API | vLLM can expose endpoints such as `/v1/chat/completions`. | Existing OpenAI-style clients and benchmark tooling can target the local server. |
-| Quantisation support | vLLM can load quantised checkpoints, such as AWQ, when the model and kernels are compatible. | Can reduce model weight memory when supported by the model, GPU, and vLLM build. |
 
 :::caution[vLLM vs SGLang]
 SGLang is another valid LLM serving framework, especially for workloads that benefit from its structured generation and programming model. For Turing-generation GPUs, however, hardware support is the key concern: SGLang [PR #9207](https://github.com/sgl-project/sglang/pull/9207) removed `sm75` support, which leaves this hardware path unsupported or unreliable.
