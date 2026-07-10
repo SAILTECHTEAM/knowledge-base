@@ -16,6 +16,8 @@ vLLM is an inference and serving engine designed for high-throughput LLM serving
 | :--- | :--- | :--- |
 | PagedAttention | KV cache is split into fixed-size blocks, similar to pages in an operating system. A request's logical token history can map to non-contiguous physical GPU memory blocks. | Reduces KV-cache fragmentation and lets vLLM use GPU memory more efficiently. |
 | Continuous batching | Requests are scheduled at iteration level. New requests can join as other requests finish, instead of waiting for a fixed batch to complete. | Improves aggregate throughput when request lengths differ. |
+| OpenAI-compatible serving | vLLM can host an open-source model on your server, wrapping it in a network layer that mimics OpenAI’s exact endpoint structure and data formats. | Existing OpenAI-style clients, SDKs, scripts, and benchmark tools can be reused by simply changing the base URL, model name, and authentication settings. |
+| Quantisation support | vLLM can serve supported quantised model formats, where model weights are stored with fewer bits than FP16 or BF16, such as supported AWQ checkpoints. | Reduces static weight memory and can make larger models fit on smaller GPUs, but it does not remove KV-cache, activation, scheduler, or long-context memory costs. |
 | Prefill/decode scheduling | vLLM schedules prompt prefill and token-by-token decode work under limits such as `--max-num-seqs` and `--max-num-batched-tokens`. | Explains why higher concurrency can improve total output tokens/s while increasing TTFT and TPOT. |
 | Chunked prefill | Long prompts can be split across scheduling iterations when enabled and supported by the active configuration. | Helps avoid one long prompt monopolising the scheduler. |
 
