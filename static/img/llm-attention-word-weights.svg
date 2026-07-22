@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="520" viewBox="0 0 920 520" role="img" aria-labelledby="title desc">
+  <title id="title">Illustrative causal attention between words</title>
+  <desc id="desc">The final token "is" attends to itself and previous context tokens with different attention weights.</desc>
+  <rect width="920" height="520" fill="#ffffff"/>
+  <text x="460" y="44" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#18212f">Causal attention over a prompt</text>
+  <text x="460" y="75" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#526070">One query position attends over the tokens available in its context.</text>
+
+  <text x="190" y="116" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" fill="#273449">Query position</text>
+  <text x="700" y="116" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" fill="#273449">Tokens available as context</text>
+
+  <line x1="260" y1="140" x2="620" y2="140" stroke="#d8dee8" stroke-width="1"/>
+  <line x1="260" y1="420" x2="620" y2="420" stroke="#d8dee8" stroke-width="1"/>
+
+  <g font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#172033">
+    <text x="190" y="170" text-anchor="middle">the</text>
+    <text x="190" y="220" text-anchor="middle">capital</text>
+    <text x="190" y="270" text-anchor="middle">of</text>
+    <text x="190" y="320" text-anchor="middle">France</text>
+    <text x="190" y="370" text-anchor="middle">is</text>
+  </g>
+
+  <g font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#172033">
+    <text x="700" y="170" text-anchor="middle">the</text>
+    <text x="700" y="220" text-anchor="middle">capital</text>
+    <text x="700" y="270" text-anchor="middle">of</text>
+    <text x="700" y="320" text-anchor="middle">France</text>
+    <text x="700" y="370" text-anchor="middle">is</text>
+  </g>
+
+  <rect x="145" y="342" width="90" height="42" rx="8" fill="#f1f7ff" stroke="#2f79c5" stroke-width="2"/>
+  <text x="190" y="410" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#2f79c5">final prompt position</text>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M235 358 C350 340, 520 172, 660 164" stroke="#2f79c5" stroke-width="2.2" opacity="0.28"/>
+    <path d="M235 360 C352 338, 520 228, 660 216" stroke="#2f79c5" stroke-width="7.2" opacity="0.78"/>
+    <path d="M235 362 C355 356, 520 278, 660 267" stroke="#2f79c5" stroke-width="3.2" opacity="0.38"/>
+    <path d="M235 364 C352 370, 520 328, 660 317" stroke="#2f79c5" stroke-width="8.6" opacity="0.88"/>
+    <path d="M235 366 C355 384, 520 378, 660 367" stroke="#2f79c5" stroke-width="4.8" opacity="0.55"/>
+  </g>
+
+  <path d="M660 392 L735 392" stroke="#2f79c5" stroke-width="8" opacity="0.85" stroke-linecap="round"/>
+  <path d="M660 418 L735 418" stroke="#2f79c5" stroke-width="3" opacity="0.35" stroke-linecap="round"/>
+  <text x="750" y="397" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#526070">larger weight</text>
+  <text x="750" y="423" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#526070">smaller weight</text>
+
+  <text x="460" y="472" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" fill="#526070">The final token can attend to itself and earlier prompt tokens; the learned weights decide which words contribute most.</text>
+</svg>
