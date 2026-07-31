@@ -49,13 +49,55 @@ When comparing tools or strategies, use a clear table:
 | **Speed** | Fast | Slow |
 | **Complexity** | Low | High |
 
-## Code Blocks and Tabs
-Use code blocks with language identifiers. For multi-platform instructions, use Tabs (if enabled in Docusaurus).
+## Code Blocks
+
+Use code blocks with language identifiers for syntax highlighting. Supported languages include `python`, `bash`, `toml`, `yaml`, `json`, `cpp`, `go`, `rust`, `java`, `mermaid`, `gitignore`, `text`, etc.
 
 ```bash
 # Example command
 pnpm add docusaurus
 ```
+
+### Code Block Titles
+
+Add a title to a code block using the `title` attribute. Use titles to label file names, tool names, or context — especially when the code block stands alone under a heading with no other body text.
+
+````markdown
+```toml title="pyproject.toml"
+[tool.ruff]
+line-length = 88
+```
+````
+
+Renders as:
+
+```toml title="pyproject.toml"
+[tool.ruff]
+line-length = 88
+```
+
+### When to Use Titles
+
+- **File identity**: When the code block represents a specific file (e.g., `title="compose.yaml"`, `title="devcontainer.json"`).
+- **Heading + code block only**: When a heading is immediately followed by a single code block with no other body text, replace the heading with a `title` attribute to reduce visual noise:
+
+  Before (redundant heading):
+  ````markdown
+  ### Pyproject Configuration
+
+  ```toml
+  [tool.pytest.ini_options]
+  testpaths = ["tests"]
+  ```
+  ````
+
+  After (cleaner with title):
+  ````markdown
+  ```toml title="pyproject.toml — Pytest"
+  [tool.pytest.ini_options]
+  testpaths = ["tests"]
+  ```
+  ````
 
 ## Diagrams (Mermaid)
 Prefer Mermaid diagrams over complex text descriptions for workflows.
