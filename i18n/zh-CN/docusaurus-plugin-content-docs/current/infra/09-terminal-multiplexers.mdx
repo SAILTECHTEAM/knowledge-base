@@ -69,6 +69,73 @@ zellij list-sessions
 | `Ctrl+t` 然后 `x` | 关闭面板 |
 | `Ctrl+t` 然后 `?` | 切换浮动帮助面板 |
 
+### CLI 用法
+
+Zellij 可完全通过命令行和 shell 脚本驱动，包括控制主机上其他位置运行的会话。这是无头工作流、CI 流水线和工作区自动化的基础。
+
+每个面板通过 `$ZELLIJ_PANE_ID` 环境变量暴露其 ID。多数操作接受 `--pane-id`（如 `terminal_3`）或 `--tab-id` 来定向特定元素而无需切换焦点。
+
+#### 命令参考
+
+| 命令 | 用途 |
+| :--- | :--- |
+| `zellij attach --create-background NAME` | 创建无头会话且不附加 |
+| `zellij --session NAME action <subcommand>` | 向主机上任意会话发送操作 |
+| `zellij action list-panes --json` | 列出面板的 ID、标题及元数据 |
+| `zellij action new-pane [--name N] -- <cmd>` | 打开运行命令的面板；输出其面板 ID |
+| `zellij action send-keys --pane-id N "Enter" "ctrl c"` | 向面板发送按键 |
+| `zellij action paste --pane-id N "text"` | 通过 bracketed paste 粘贴文本（多行更可靠） |
+| `zellij action dump-screen --pane-id N --full` | 捕获面板的可视区与回滚历史 |
+| `zellij subscribe --pane-id N --format json` | 实时流式输出面板内容 |
+
+:::tip[优先使用 paste 而非输入]
+`action paste` 通过 bracketed-paste 模式写入文本，向面板注入命令时比 `send-keys` 更可靠。随后用 `send-keys "Enter"` 执行。
+:::
+
+#### 在面板中运行命令
+
+`zellij action new-pane`（等价于顶层命令 `zellij run`）在新面板中启动命令并输出新面板 ID，脚本可捕获它以串联后续操作：
+
+```bash
+# 打开面板，捕获其 ID，并在其中启动构建
+PANE_ID=$(zellij action new-pane --name "build")
+zellij action paste --pane-id "$PANE_ID" "cargo build 2>&1" &&
+zellij action send-keys --pane-id "$PANE_ID" "Enter"
+```
+
+阻塞标志会暂停调用 shell 直到面板中的命令结束，从而支持带手动重试的顺序化脚本流水线：
+
+```bash
+# 重试直到测试通过，再构建
+zellij action new-pane --block-until-exit-success --name "tests" -- cargo test
+zellij action new-pane --block-until-exit-success --name "release" -- cargo build --release
+```
+
+#### 控制后台会话
+
+后台会话以分离方式创建，完全通过全局 `--session` 标志从 CLI 驱动——适合 CI 或远程自动化：
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 以紧凑布局启动无头会话
+zellij attach --create-background ci-runner options --default-layout compact
+
+# 在该会话中打开面板并运行构建
+BUILD_PANE=$(zellij --session ci-runner action new-pane --name "build")
+zellij --session ci-runner action paste --pane-id "$BUILD_PANE" "cargo build 2>&1" &&
+zellij --session ci-runner action send-keys --pane-id "$BUILD_PANE" "Enter"
+
+# 流式输出构建内容并筛选相关行
+zellij --session ci-runner subscribe --pane-id "$BUILD_PANE" --format json \
+  | jq --unbuffered 'select(.event == "pane_update") | .viewport[] | select(test("error|warning|Finished"))'
+```
+
+:::note[只读访问]
+`zellij watch NAME` 以只读模式附加到会话——可见输出但不接受任何输入，适合共享观察。
+:::
+
 ### 安装
 
 #### 通过安装脚本
@@ -293,6 +360,79 @@ tmux list-sessions
 | `Ctrl+b` 然后 `"` | 水平分割 |
 | `Ctrl+b` 然后方向键 | 在面板间切换 |
 | `Ctrl+b` 然后 `d` | 分离会话 |
+
+### CLI 用法
+
+tmux 通过命令行接口暴露其全部功能，因此会话、窗口和面板均可由 shell 脚本创建和控制——包括在不附加的情况下向运行中的会话注入命令。这使 tmux 适用于引导脚本、远程编排和可复现的开发环境。
+
+#### 命令参考
+
+| 命令 | 用途 |
+| :--- | :--- |
+| `tmux new-session -d -s NAME` | 创建分离会话（不附加） |
+| `tmux has-session -t NAME` | 会话存在时退出码为 0（脚本守卫） |
+| `tmux send-keys -t TARGET 'cmd' C-m` | 向面板发送命令并回车 |
+| `tmux new-window -t NAME -n win` | 创建窗口 |
+| `tmux split-window -v -t TARGET` | 分割活动面板（`-v` 上下堆叠，`-h` 左右并排） |
+| `tmux capture-pane -p -t TARGET` | 将面板可见内容输出到 stdout |
+| `tmux list-sessions`（`tmux ls`） | 列出会话 |
+| `tmux kill-session -t NAME` | 终止会话 |
+| `tmux source-file ~/.tmux.conf` | 重新加载配置 |
+
+目标以 `session`、`session:window` 或 `session:window.pane` 的形式解析。为保证脚本可靠性，优先使用最具体的目标（如 `dev:0.1`），或捕获 `new-session` 返回的面板 ID。
+
+:::caution[避免 send-keys 竞态]
+`tmux new-session -d` 在新面板的 shell 准备好读取输入之前就返回，因此紧随其后的 `send-keys` 可能被回显而非执行。要么直接把命令传给 `new-session`，要么加一个短暂延迟：
+
+```bash
+tmux new-session -d -s dev 'cd ~/projects/myapp && exec bash'   # 命令在面板的 shell 内运行
+# 或
+tmux new-session -d -s dev && sleep 0.5
+```
+
+:::
+
+#### 脚本化工作区搭建
+
+常见模式是编写幂等的启动脚本：若会话已存在则复用，否则分离式构建全新的多面板布局，最后再附加：
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SESSION="dev"
+
+# 若会话已存在则复用
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -t "$SESSION"
+fi
+
+# 分离式构建布局
+tmux new-session -d -s "$SESSION" -n editor
+tmux send-keys -t "$SESSION:editor" 'cd ~/projects/myapp && vim .' C-m
+tmux split-window -v -p 30 -t "$SESSION:editor"
+tmux send-keys -t "$SESSION:editor.1" 'cd ~/projects/myapp' C-m
+
+tmux new-window -t "$SESSION" -n server
+tmux send-keys -t "$SESSION:server" 'cd ~/projects/myapp && npm run dev' C-m
+
+tmux new-window -t "$SESSION" -n logs
+tmux send-keys -t "$SESSION:logs" 'tail -f ~/projects/myapp/logs/dev.log' C-m
+
+tmux select-window -t "$SESSION:editor"
+tmux attach -t "$SESSION"
+```
+
+#### 远程控制
+
+由于每条 `tmux <command>` 都通过 socket 与服务端通信，运行中的会话可从任意位置驱动——包括通过 SSH——而无需附加：
+
+```bash
+# 在远程主机的分离会话中重启服务
+ssh user@host "tmux send-keys -t api 'sudo systemctl restart api' C-m"
+
+# 远程查看面板输出
+ssh user@host "tmux capture-pane -p -t api:0.0" | tail -n 20
+```
 
 ### 安装
 

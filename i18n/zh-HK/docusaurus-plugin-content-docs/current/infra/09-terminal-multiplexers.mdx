@@ -69,6 +69,73 @@ zellij list-sessions
 | `Ctrl+t` 然後 `x` | 關閉窗格 |
 | `Ctrl+t` 然後 `?` | 切換浮動說明窗格 |
 
+### CLI 用法
+
+Zellij 可完全透過命令列與 shell 腳本驅動，包括控制主機上其他位置執行的工作階段。這是無頭工作流、CI 流水線與工作區自動化的基礎。
+
+每個窗格透過 `$ZELLIJ_PANE_ID` 環境變數暴露其 ID。多數操作接受 `--pane-id`（如 `terminal_3`）或 `--tab-id` 來定向特定元素而無需切換焦點。
+
+#### 命令參考
+
+| 命令 | 用途 |
+| :--- | :--- |
+| `zellij attach --create-background NAME` | 建立無頭工作階段且不附加 |
+| `zellij --session NAME action <subcommand>` | 向主機上任意工作階段發送操作 |
+| `zellij action list-panes --json` | 列出窗格的 ID、標題及元資料 |
+| `zellij action new-pane [--name N] -- <cmd>` | 開啟執行命令的窗格；輸出其窗格 ID |
+| `zellij action send-keys --pane-id N "Enter" "ctrl c"` | 向窗格發送按鍵 |
+| `zellij action paste --pane-id N "text"` | 透過 bracketed paste 貼上文字（多行更可靠） |
+| `zellij action dump-screen --pane-id N --full` | 擷取窗格的可視區與回捲歷史 |
+| `zellij subscribe --pane-id N --format json` | 即時串流輸出窗格內容 |
+
+:::tip[優先使用 paste 而非輸入]
+`action paste` 透過 bracketed-paste 模式寫入文字，向窗格注入命令時比 `send-keys` 更可靠。隨後用 `send-keys "Enter"` 執行。
+:::
+
+#### 在窗格中執行命令
+
+`zellij action new-pane`（等價於頂層命令 `zellij run`）在新窗格中啟動命令並輸出新窗格 ID，腳本可捕獲它以串聯後續操作：
+
+```bash
+# 開啟窗格，捕獲其 ID，並在其中啟動建置
+PANE_ID=$(zellij action new-pane --name "build")
+zellij action paste --pane-id "$PANE_ID" "cargo build 2>&1" &&
+zellij action send-keys --pane-id "$PANE_ID" "Enter"
+```
+
+阻塞旗標會暫停呼叫 shell 直到窗格中的命令結束，從而支援帶手動重試的循序化腳本流水線：
+
+```bash
+# 重試直到測試通過，再建置
+zellij action new-pane --block-until-exit-success --name "tests" -- cargo test
+zellij action new-pane --block-until-exit-success --name "release" -- cargo build --release
+```
+
+#### 控制背景工作階段
+
+背景工作階段以分離方式建立，完全透過全域 `--session` 旗標從 CLI 驅動——適合 CI 或遠端自動化：
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 以緊湊布局啟動無頭工作階段
+zellij attach --create-background ci-runner options --default-layout compact
+
+# 在該工作階段中開啟窗格並執行建置
+BUILD_PANE=$(zellij --session ci-runner action new-pane --name "build")
+zellij --session ci-runner action paste --pane-id "$BUILD_PANE" "cargo build 2>&1" &&
+zellij --session ci-runner action send-keys --pane-id "$BUILD_PANE" "Enter"
+
+# 串流輸出建置內容並篩選相關行
+zellij --session ci-runner subscribe --pane-id "$BUILD_PANE" --format json \
+  | jq --unbuffered 'select(.event == "pane_update") | .viewport[] | select(test("error|warning|Finished"))'
+```
+
+:::note[唯讀存取]
+`zellij watch NAME` 以唯讀模式附加到工作階段——可見輸出但不接受任何輸入，適合共享觀察。
+:::
+
 ### 安裝
 
 #### 透過安裝指令碼
@@ -293,6 +360,79 @@ tmux list-sessions
 | `Ctrl+b` 然後 `"` | 水平分割 |
 | `Ctrl+b` 然後方向鍵 | 在窗格間切換 |
 | `Ctrl+b` 然後 `d` | 分離工作階段 |
+
+### CLI 用法
+
+tmux 透過命令列介面暴露其全部功能，因此工作階段、視窗和窗格均可由 shell 腳本建立和控制——包括在不附加的情況下向執行中的工作階段注入命令。這使 tmux 適用於引導腳本、遠端編排和可重現的開發環境。
+
+#### 命令參考
+
+| 命令 | 用途 |
+| :--- | :--- |
+| `tmux new-session -d -s NAME` | 建立分離工作階段（不附加） |
+| `tmux has-session -t NAME` | 工作階段存在時離開碼為 0（腳本守衛） |
+| `tmux send-keys -t TARGET 'cmd' C-m` | 向窗格發送命令並換行 |
+| `tmux new-window -t NAME -n win` | 建立視窗 |
+| `tmux split-window -v -t TARGET` | 分割活動窗格（`-v` 上下堆疊，`-h` 左右並排） |
+| `tmux capture-pane -p -t TARGET` | 將窗格可見內容輸出到 stdout |
+| `tmux list-sessions`（`tmux ls`） | 列出工作階段 |
+| `tmux kill-session -t NAME` | 終止工作階段 |
+| `tmux source-file ~/.tmux.conf` | 重新載入設定 |
+
+目標以 `session`、`session:window` 或 `session:window.pane` 的形式解析。為保證腳本可靠性，優先使用最具體的目標（如 `dev:0.1`），或捕獲 `new-session` 回傳的窗格 ID。
+
+:::caution[避免 send-keys 競態]
+`tmux new-session -d` 在新窗格的 shell 準備好讀取輸入之前就回傳，因此緊隨其後的 `send-keys` 可能被回顯而非執行。要麼直接把命令傳給 `new-session`，要麼加一個短暫延遲：
+
+```bash
+tmux new-session -d -s dev 'cd ~/projects/myapp && exec bash'   # 命令在窗格的 shell 內執行
+# 或
+tmux new-session -d -s dev && sleep 0.5
+```
+
+:::
+
+#### 腳本化工作區搭建
+
+常見模式是編寫冪等的啟動腳本：若工作階段已存在則重用，否則分離式建置全新的多窗格布局，最後再附加：
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SESSION="dev"
+
+# 若工作階段已存在則重用
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -t "$SESSION"
+fi
+
+# 分離式建置布局
+tmux new-session -d -s "$SESSION" -n editor
+tmux send-keys -t "$SESSION:editor" 'cd ~/projects/myapp && vim .' C-m
+tmux split-window -v -p 30 -t "$SESSION:editor"
+tmux send-keys -t "$SESSION:editor.1" 'cd ~/projects/myapp' C-m
+
+tmux new-window -t "$SESSION" -n server
+tmux send-keys -t "$SESSION:server" 'cd ~/projects/myapp && npm run dev' C-m
+
+tmux new-window -t "$SESSION" -n logs
+tmux send-keys -t "$SESSION:logs" 'tail -f ~/projects/myapp/logs/dev.log' C-m
+
+tmux select-window -t "$SESSION:editor"
+tmux attach -t "$SESSION"
+```
+
+#### 遠端控制
+
+由於每條 `tmux <command>` 都透過 socket 與伺服器通訊，執行中的工作階段可從任意位置驅動——包括透過 SSH——而無需附加：
+
+```bash
+# 在遠端主機的分離工作階段中重啟服務
+ssh user@host "tmux send-keys -t api 'sudo systemctl restart api' C-m"
+
+# 遠端查看窗格輸出
+ssh user@host "tmux capture-pane -p -t api:0.0" | tail -n 20
+```
 
 ### 安裝
 

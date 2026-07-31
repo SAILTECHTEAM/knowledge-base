@@ -69,6 +69,73 @@ zellij list-sessions
 | `Ctrl+t` then `x` | Close pane |
 | `Ctrl+t` then `?` | Toggle floating help pane |
 
+### CLI Usage
+
+Zellij can be driven entirely from the command line and shell scripts, including controlling sessions running elsewhere on the host. This is the foundation for headless workflows, CI pipelines, and workspace automation.
+
+Every pane exposes its ID through the `$ZELLIJ_PANE_ID` environment variable. Most actions accept `--pane-id` (e.g. `terminal_3`) or `--tab-id` to target a specific element without changing focus.
+
+#### Command Reference
+
+| Command | Purpose |
+| :--- | :--- |
+| `zellij attach --create-background NAME` | Create a headless session without attaching |
+| `zellij --session NAME action <subcommand>` | Issue an action to any session on the host |
+| `zellij action list-panes --json` | List panes with IDs, titles, and metadata |
+| `zellij action new-pane [--name N] -- <cmd>` | Open a pane running a command; prints its pane ID |
+| `zellij action send-keys --pane-id N "Enter" "ctrl c"` | Send keystrokes to a pane |
+| `zellij action paste --pane-id N "text"` | Paste text via bracketed paste (robust for multi-line) |
+| `zellij action dump-screen --pane-id N --full` | Capture a pane's viewport and scrollback |
+| `zellij subscribe --pane-id N --format json` | Stream a pane's output in real time |
+
+:::tip[Prefer paste over typing]
+`action paste` writes text through bracketed-paste mode and is more reliable than `send-keys` when injecting commands into a pane. Follow it with `send-keys "Enter"` to execute.
+:::
+
+#### Run Commands in Panes
+
+`zellij action new-pane` (equivalently the top-level `zellij run`) launches a command in a new pane and prints the new pane ID, which scripts capture to chain follow-up actions:
+
+```bash
+# Open a pane, capture its ID, and start a build in it
+PANE_ID=$(zellij action new-pane --name "build")
+zellij action paste --pane-id "$PANE_ID" "cargo build 2>&1" &&
+zellij action send-keys --pane-id "$PANE_ID" "Enter"
+```
+
+Blocking flags pause the calling shell until the pane's command finishes, enabling sequential scripted pipelines with manual retry:
+
+```bash
+# Retry until tests pass, then build
+zellij action new-pane --block-until-exit-success --name "tests" -- cargo test
+zellij action new-pane --block-until-exit-success --name "release" -- cargo build --release
+```
+
+#### Controlling a Background Session
+
+A background session is created detached and driven entirely from the CLI via the global `--session` flag — ideal for CI or remote automation:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Start a headless session with a compact layout
+zellij attach --create-background ci-runner options --default-layout compact
+
+# Open a pane in that session and run a build
+BUILD_PANE=$(zellij --session ci-runner action new-pane --name "build")
+zellij --session ci-runner action paste --pane-id "$BUILD_PANE" "cargo build 2>&1" &&
+zellij --session ci-runner action send-keys --pane-id "$BUILD_PANE" "Enter"
+
+# Stream build output and surface relevant lines
+zellij --session ci-runner subscribe --pane-id "$BUILD_PANE" --format json \
+  | jq --unbuffered 'select(.event == "pane_update") | .viewport[] | select(test("error|warning|Finished"))'
+```
+
+:::note[Read-only access]
+`zellij watch NAME` attaches to a session in read-only mode — output is visible but no input is accepted, useful for shared observation.
+:::
+
 ### Installation
 
 #### Via Installer Script
@@ -293,6 +360,79 @@ tmux list-sessions
 | `Ctrl+b` then `"` | Split horizontally |
 | `Ctrl+b` then `Arrow` | Navigate pane |
 | `Ctrl+b` then `d` | Detach session |
+
+### CLI Usage
+
+tmux exposes its full feature set through a command-line interface, so sessions, windows, and panes can be created and controlled from shell scripts — including injecting commands into running sessions without attaching. This makes tmux well suited to boot scripts, remote orchestration, and reproducible development environments.
+
+#### Command Reference
+
+| Command | Purpose |
+| :--- | :--- |
+| `tmux new-session -d -s NAME` | Create a detached session (does not attach) |
+| `tmux has-session -t NAME` | Exit 0 if the session exists (script guard) |
+| `tmux send-keys -t TARGET 'cmd' C-m` | Send a command and Enter to a pane |
+| `tmux new-window -t NAME -n win` | Create a window |
+| `tmux split-window -v -t TARGET` | Split the active pane (`-v` horizontal stack, `-h` side-by-side) |
+| `tmux capture-pane -p -t TARGET` | Print a pane's visible content to stdout |
+| `tmux list-sessions` (`tmux ls`) | List sessions |
+| `tmux kill-session -t NAME` | Terminate a session |
+| `tmux source-file ~/.tmux.conf` | Reload configuration |
+
+Targets resolve in the form `session`, `session:window`, or `session:window.pane`. For reliability in scripts, prefer the most specific target (e.g. `dev:0.1`) or capture the pane ID returned by `new-session`.
+
+:::caution[Avoid the send-keys race]
+`tmux new-session -d` returns before the new pane's shell is ready to read input, so an immediate `send-keys` may be echoed rather than executed. Either pass the command directly to `new-session`, or add a short delay:
+
+```bash
+tmux new-session -d -s dev 'cd ~/projects/myapp && exec bash'   # command runs inside the pane's shell
+# or
+tmux new-session -d -s dev && sleep 0.5
+```
+
+:::
+
+#### Scripted Workspace Setup
+
+A common pattern is an idempotent startup script that reuses an existing session or builds a fresh multi-pane layout detached, then attaches:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SESSION="dev"
+
+# Reuse an existing session if present
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -t "$SESSION"
+fi
+
+# Build the layout detached
+tmux new-session -d -s "$SESSION" -n editor
+tmux send-keys -t "$SESSION:editor" 'cd ~/projects/myapp && vim .' C-m
+tmux split-window -v -p 30 -t "$SESSION:editor"
+tmux send-keys -t "$SESSION:editor.1" 'cd ~/projects/myapp' C-m
+
+tmux new-window -t "$SESSION" -n server
+tmux send-keys -t "$SESSION:server" 'cd ~/projects/myapp && npm run dev' C-m
+
+tmux new-window -t "$SESSION" -n logs
+tmux send-keys -t "$SESSION:logs" 'tail -f ~/projects/myapp/logs/dev.log' C-m
+
+tmux select-window -t "$SESSION:editor"
+tmux attach -t "$SESSION"
+```
+
+#### Remote Control
+
+Because every `tmux <command>` talks to the server over a socket, a running session can be driven from anywhere — including over SSH — without ever attaching:
+
+```bash
+# Restart a service inside a detached session on a remote host
+ssh user@host "tmux send-keys -t api 'sudo systemctl restart api' C-m"
+
+# Inspect a pane's output remotely
+ssh user@host "tmux capture-pane -p -t api:0.0" | tail -n 20
+```
 
 ### Installation
 
