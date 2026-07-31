@@ -138,186 +138,45 @@ zellij --session ci-runner subscribe --pane-id "$BUILD_PANE" --format json \
 
 ### 安装
 
-#### 通过安装脚本
+最新的安装选项请参阅官方说明：https://zellij.dev/documentation/installation.html
 
-以下脚本从源码编译（需要 Rust 工具链），失败时回退到预编译二进制文件：
+#### 通过 Cargo
+
+编译最新发布版（需要 Rust 工具链）：
 
 ```bash
-#!/usr/bin/env bash
-
-# Zellij 安装脚本
-# 通过 cargo install 从源码编译，回退到预编译二进制文件
-
-set -euo pipefail
-
-# 加载公共函数
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/common.sh"
-
-# 配置
-ZELLIJ_VERSION="v0.44.3"
-ZELLIJ_CARGO_VERSION="0.44.3"
-ZELLIJ_CONFIG="${HOME}/.config/zellij/config.kdl"
-REPO_ROOT="$(get_repo_path)"
-REPO_CONFIG="${REPO_ROOT}/.config/zellij/config.kdl"
-AUTO_YES=0
-DO_INSTALL=1
-DO_SYNC=1
-
-ensure_cargo() {
-    if [[ -f "${HOME}/.cargo/env" ]]; then
-        source "${HOME}/.cargo/env"
-    fi
-    check_command_exists cargo
-}
-
-install_zellij_cargo() {
-    log_info "Building Zellij ${ZELLIJ_VERSION} from source (this may take a few minutes)..."
-    cargo install zellij --version "${ZELLIJ_CARGO_VERSION}" --locked
-
-    ensure_local_bin
-    if [[ -f "${HOME}/.cargo/bin/zellij" ]]; then
-        cp -f "${HOME}/.cargo/bin/zellij" "${HOME}/.local/bin/zellij"
-    fi
-
-    verify_installation zellij "Zellij"
-}
-
-install_zellij_binary() {
-    local arch
-    arch=$(uname -m)
-
-    case "$arch" in
-        x86_64) arch="x86_64-unknown-linux-musl" ;;
-        aarch64) arch="aarch64-unknown-linux-musl" ;;
-        *)
-            log_error "Unsupported architecture: $arch"
-            return 1
-            ;;
-    esac
-
-    local filename="zellij-${arch}.tar.gz"
-    local download_url="https://github.com/zellij-org/zellij/releases/download/${ZELLIJ_VERSION}/${filename}"
-
-    log_info "Downloading Zellij ${ZELLIJ_VERSION} prebuilt binary (${arch})..."
-
-    local temp_dir
-    temp_dir=$(mktemp -d)
-    local original_dir
-    original_dir=$(pwd)
-
-    cd "$temp_dir"
-
-    if ! download_file "$download_url" "$filename"; then
-        log_error "Failed to download zellij"
-        cd "$original_dir"
-        rm -rf "$temp_dir"
-        return 1
-    fi
-
-    log_info "Extracting Zellij..."
-    tar -xzf "$filename"
-
-    if [[ -f "zellij" ]]; then
-        chmod +x "zellij"
-        ensure_local_bin
-        mv "zellij" "${HOME}/.local/bin/zellij"
-        log_info "Installed zellij to ${HOME}/.local/bin/"
-    else
-        log_error "Failed to find zellij binary in archive"
-        cd "$original_dir"
-        rm -rf "$temp_dir"
-        return 1
-    fi
-
-    cd "$original_dir"
-    rm -rf "$temp_dir"
-
-    verify_installation zellij "Zellij"
-}
-
-install_zellij() {
-    if check_command_exists zellij; then
-        local current_version
-        current_version=$(zellij --version 2>&1 || echo "unknown")
-        log_info "Zellij is already installed: $current_version"
-
-        if ! prompt_yes_no_auto "Reinstall zellij anyway?" "n"; then
-            log_info "Skipping zellij installation"
-            return 0
-        fi
-    fi
-
-    if ensure_cargo 2>/dev/null; then
-        log_info "Rust toolchain found, building from source..."
-        install_zellij_cargo
-    else
-        log_info "No Rust toolchain found, downloading prebuilt binary..."
-        log_warning "Prebuilt binary may have library compatibility issues on some systems"
-        install_zellij_binary
-    fi
-}
-
-sync_zellij_config() {
-    log_info "Setting up Zellij configuration..."
-    ensure_dir "$(dirname "$ZELLIJ_CONFIG")"
-
-    if [[ ! -f "$REPO_CONFIG" && -f "$ZELLIJ_CONFIG" ]]; then
-        copy_config_to_repo "$ZELLIJ_CONFIG" "$REPO_CONFIG" >/dev/null || true
-    fi
-
-    if [[ ! -f "$REPO_CONFIG" ]]; then
-        ensure_parent_dir "$REPO_CONFIG"
-        touch "$REPO_CONFIG"
-        log_info "Created repo config placeholder: $REPO_CONFIG"
-    fi
-
-    create_symlink "$REPO_CONFIG" "$ZELLIJ_CONFIG"
-}
-
-main() {
-    parse_common_args "$@"
-
-    if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
-        ZELLIJ_VERSION="${POSITIONAL_ARGS[0]}"
-    fi
-
-    log_step "Installing Zellij ${ZELLIJ_VERSION} (terminal multiplexer)"
-
-    if [[ "$DO_INSTALL" -eq 1 ]]; then
-        install_zellij
-    else
-        log_info "Skipping zellij binary installation (--config-only/--skip-install)"
-    fi
-
-    if [[ "$DO_SYNC" -eq 1 ]]; then
-        sync_zellij_config
-    else
-        log_info "Skipping Zellij config sync (--skip-config)"
-    fi
-
-    echo ""
-    log_success "Zellij installation and configuration complete"
-    if check_command_exists zellij; then
-        log_info "Zellij binary: $(which zellij)"
-    fi
-    log_info "Config location: $ZELLIJ_CONFIG (linked to $REPO_CONFIG)"
-    echo ""
-    log_info "Run 'zellij' to start a new session"
-    echo ""
-}
-
-main "$@"
+cargo install --locked zellij
 ```
 
+若通过 rustup 安装 Cargo 后出现错误，先运行 `rustup update`。
+
+#### 通过 cargo-binstall
+
+跳过编译，直接安装预编译二进制：
+
+```bash
+cargo binstall zellij
+```
+
+#### 通过预编译二进制
+
+从[发布页面](https://github.com/zellij-org/zellij/releases)下载对应平台的压缩包，解压并运行二进制：
+
+```bash
+tar -xvf zellij*.tar.gz
+chmod +x zellij
+./zellij
+```
+
+将二进制移动到 `$PATH` 中的目录，即可在任意位置运行。
+
 #### 通过包管理器
+
+Zellij 已打包到多个第三方仓库，包状态见 [Repology](https://repology.org/project/zellij/versions)：
 
 ```bash
 # macOS
 brew install zellij
-
-# Ubuntu/Debian
-cargo install zellij
 
 # Arch Linux
 pacman -S zellij
