@@ -136,6 +136,45 @@ zellij --session ci-runner subscribe --pane-id "$BUILD_PANE" --format json \
 `zellij watch NAME` attaches to a session in read-only mode — output is visible but no input is accepted, useful for shared observation.
 :::
 
+#### Practical Examples
+
+The patterns above compose into reusable workspace scripts.
+
+**Deep Learning Training Workspace**
+
+A detached, reusable session with dedicated panes for training, GPU monitoring, log inspection, and TensorBoard. Safe to invoke repeatedly:
+
+```bash
+#!/usr/bin/env bash
+# ~/.local/bin/dl-train-startup — start or reattach to the training workspace
+set -euo pipefail
+SESSION="dl-train"
+
+# Create the session in the background only if it doesn't already exist
+if ! zellij list-sessions 2>/dev/null | grep -q "$SESSION"; then
+  zellij attach --create-background "$SESSION"
+
+  # Pane — training run, output tee'd to a log file for inspection
+  zellij --session "$SESSION" action new-pane -- \
+    bash -c "exec python -m my_project.train --config configs/resnet50.yaml 2>&1 | tee train.log"
+
+  # Pane — live GPU utilization
+  zellij --session "$SESSION" action new-pane -- watch -n 1 nvidia-smi
+
+  # Pane — tail the training log
+  zellij --session "$SESSION" action new-pane -- \
+    bash -c "touch train.log; tail -F train.log"
+
+  # Pane — TensorBoard, accessible from your browser
+  zellij --session "$SESSION" action new-pane -- \
+    bash -c "mkdir -p runs && tensorboard --logdir=runs --port=6006 --bind=0.0.0.0"
+fi
+
+zellij attach "$SESSION"
+```
+
+Training continues in the background pane even after you detach or disconnect from SSH.
+
 ### Installation
 
 See the official instructions at https://zellij.dev/documentation/installation.html for the most up-to-date options.
@@ -292,6 +331,41 @@ ssh user@host "tmux send-keys -t api 'sudo systemctl restart api' C-m"
 # Inspect a pane's output remotely
 ssh user@host "tmux capture-pane -p -t api:0.0" | tail -n 20
 ```
+
+#### Practical Examples
+
+The patterns above compose into reusable workspace scripts.
+
+**Deep Learning Training Workspace**
+
+A detached, reusable session with windows for training + GPU/log monitoring, and TensorBoard. Safe to invoke repeatedly:
+
+```bash
+#!/usr/bin/env bash
+# ~/.local/bin/dl-train-startup — start or reattach to the training workspace
+set -euo pipefail
+SESSION="dl-train"
+
+# Reuse the existing session if present
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -t "$SESSION"
+fi
+
+# Window "train": training top-left, GPU monitor right, log tail bottom-left
+tmux new-session -d -s "$SESSION" -n train \
+  "python -m my_project.train --config configs/resnet50.yaml 2>&1 | tee train.log"
+tmux split-window -h -t "$SESSION:train" "watch -n 1 nvidia-smi"
+tmux split-window -v -t "$SESSION:train.0" "tail -F train.log"
+
+# Window "tensorboard": single pane
+tmux new-window -t "$SESSION" -n tensorboard \
+  "mkdir -p runs && tensorboard --logdir=runs --port=6006 --bind=0.0.0.0"
+
+tmux select-window -t "$SESSION:train"
+tmux attach -t "$SESSION"
+```
+
+Training continues in the background pane even after you detach or disconnect from SSH.
 
 ### Installation
 
