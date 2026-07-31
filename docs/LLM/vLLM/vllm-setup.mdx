@@ -1,0 +1,128 @@
+---
+sidebar_position: 3
+title: vLLM Setup
+description: General vLLM serving concepts and Docker setup commands for running an OpenAI-compatible LLM server.
+---
+
+# vLLM Setup
+
+This page explains vLLM serving concepts and a general Docker-based setup flow for running an OpenAI-compatible LLM server. Hardware-specific benchmark settings and findings are documented separately in [vLLM Experimentation and Findings](./vllm-experimentation-findings).
+
+## Key vLLM Ideas
+
+vLLM is an inference and serving engine designed for high-throughput LLM serving. Its key ideas include PagedAttention, continuous batching, OpenAI-compatible serving, quantisation support, and scheduler controls such as `--max-num-seqs` and `--max-num-batched-tokens`.
+
+| Idea | What it means | Why it matters |
+| :--- | :--- | :--- |
+| PagedAttention | KV cache is split into fixed-size blocks, similar to pages in an operating system. A request's logical token history can map to non-contiguous physical GPU memory blocks. | Reduces KV-cache fragmentation and lets vLLM use GPU memory more efficiently. |
+| Continuous batching | Requests are scheduled at iteration level. New requests can join as other requests finish, instead of waiting for a fixed batch to complete. | Improves aggregate throughput when request lengths differ. |
+| OpenAI-compatible serving | vLLM can host an open-source model on your server, wrapping it in a network layer that mimics OpenAI’s exact endpoint structure and data formats. | Existing OpenAI-style clients, SDKs, scripts, and benchmark tools can be reused by simply changing the base URL, model name, and authentication settings. |
+| Quantisation support | vLLM can serve supported quantised model formats, where model weights are stored with fewer bits than FP16 or BF16, such as supported AWQ checkpoints. | Reduces static weight memory and can make larger models fit on smaller GPUs, but it does not remove KV-cache, activation, scheduler, or long-context memory costs. |
+| Prefill/decode scheduling | vLLM schedules prompt prefill and token-by-token decode work under limits such as `--max-num-seqs` and `--max-num-batched-tokens`. | Explains why higher concurrency can improve total output tokens/s while increasing TTFT and TPOT. |
+| Chunked prefill | Long prompts can be split across scheduling iterations when enabled and supported by the active configuration. | Helps avoid one long prompt monopolising the scheduler. |
+
+:::caution[vLLM vs SGLang]
+SGLang is another valid LLM serving framework, especially for workloads that benefit from its structured generation and programming model. For Turing-generation GPUs, however, hardware support is the key concern: SGLang [PR #9207](https://github.com/sgl-project/sglang/pull/9207) removed `sm75` support, which leaves this hardware path unsupported or unreliable.
+:::
+
+## Common Setup Variables
+
+The setup uses a Dockerised vLLM OpenAI-compatible server. Replace placeholder values such as `<model-repository>` and `<gpu-id>` with values for the target environment.
+
+```bash
+export WORKDIR="<workdir>"
+export MODEL="<model-repository>"
+export IMAGE="vllm/vllm-openai:latest"
+export GPU_DEVICE="<gpu-id>"
+export CONTAINER="<container-name>"
+export CACHE_VOLUME="<cache-volume-name>"
+
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+docker volume create "$CACHE_VOLUME"
+```
+
+`CACHE_VOLUME` is a named Docker volume used for the Hugging Face model cache. The container sees it at `/root/.cache/huggingface`, but Docker stores the data outside the removable container filesystem.
+
+```text
+Docker volume: <cache-volume-name>
+        |
+        v
+Container path: /root/.cache/huggingface
+        |
+        v
+Downloaded model files and tokenizer files
+```
+
+This matters because vLLM containers are often removed and recreated when server-side limits change. Without a persistent cache volume, removing the container can also remove the downloaded model cache inside that container. With the volume, the next container can reuse the model files instead of downloading them again.
+
+The cache volume helps startup and repeatability, but it does not directly change benchmark metrics after the server has loaded:
+
+| Area | Effect of cache volume |
+| :--- | :--- |
+| Model download time | Usually faster after the first run because files are reused. |
+| Network reliability | Better, because repeated tests do not depend on repeated downloads. |
+| Container restart workflow | Cleaner, because containers can be removed while model files persist. |
+| TTFT, TPOT, output tokens/s, VRAM usage | Not directly changed. |
+
+## Pull the Image
+
+Pull the image before starting the server:
+
+```bash
+docker pull "$IMAGE"
+```
+
+Docker tags such as `latest` can move. For benchmark work, record the exact image digest in the experiment artefacts after creating a run-specific result directory.
+
+## Start the vLLM Server
+
+Server-side limits are startup choices. Set them before starting the container:
+
+```bash
+export MAX_MODEL_LEN="<max-context-tokens>"
+export MAX_NUM_SEQS="<max-active-sequences>"
+export MAX_NUM_BATCHED_TOKENS="<max-batched-tokens>"
+export GPU_MEMORY_UTILIZATION="<gpu-memory-fraction>"
+export DTYPE="<dtype>"
+```
+
+Start the server for the current server-side limits:
+
+```bash
+docker run -d \
+  --name "$CONTAINER" \
+  --gpus "\"device=${GPU_DEVICE}\"" \
+  --mount type=volume,source="$CACHE_VOLUME",target=/root/.cache/huggingface \
+  "$IMAGE" \
+    --model "$MODEL" \
+    --dtype "$DTYPE" \
+    --max-model-len "$MAX_MODEL_LEN" \
+    --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+    --max-num-seqs "$MAX_NUM_SEQS" \
+    --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS"
+```
+
+## Important vLLM Flags
+
+| Flag | Purpose | When to adjust it |
+| :--- | :--- | :--- |
+| `--model` | Loads the model repository or checkpoint. | Change it when serving a different Hugging Face repository, local checkpoint, or model alias. |
+| `--dtype` | Sets the execution dtype. | Choose a dtype supported by the model, GPU architecture, and vLLM build. |
+| `--max-model-len` | Sets the planned maximum context length. | Increase it only when longer prompts are required and there is enough KV-cache memory. |
+| `--gpu-memory-utilization` | Controls the fraction of GPU memory vLLM may use. | Raise it to allocate more memory to vLLM; lower it to leave more headroom for other processes. |
+| `--max-num-seqs` | Limits active sequences per scheduler iteration. | Increase it to allow more active requests, while watching TTFT, TPOT, and KV-cache pressure. |
+| `--max-num-batched-tokens` | Limits tokens processed in one scheduler iteration. | Tune it when changing context length, prefill load, or batching behaviour. |
+
+
+## References
+
+- [vLLM documentation](https://docs.vllm.ai/en/latest/)
+- [vLLM engine arguments](https://docs.vllm.ai/en/latest/configuration/engine_args/)
+- [vLLM Docker deployment](https://docs.vllm.ai/en/latest/deployment/docker/)
+- [vLLM OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/)
+- [vLLM PagedAttention blog](https://vllm.ai/blog/2023-06-20-vllm)
+- [PagedAttention paper](https://arxiv.org/abs/2309.06180)
+- [NVIDIA CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus)
+- [SGLang sm75 deprecation RFC](https://github.com/sgl-project/sglang/issues/6006)
+- [SGLang PR #9207: feat: remove sm75](https://github.com/sgl-project/sglang/pull/9207)
