@@ -1,0 +1,442 @@
+---
+sidebar_position: 9
+title: Terminal Multiplexers
+description: Comparison of Zellij, tmux, and dtach — terminal session management tools for SSH workflows and persistent sessions.
+---
+
+# Terminal Multiplexers
+
+Terminal multiplexers allow managing multiple terminal sessions from a single window, detaching and reattaching across SSH connections, and keeping processes running after network disconnections.
+
+---
+
+## Comparison
+
+| Dimension | Zellij | tmux | dtach |
+| :--- | :--- | :--- | :--- |
+| **Language** | Rust | C | C |
+| **Configuration** | KDL (human-readable) | tmux.conf (DSL) | Minimal CLI flags |
+| **Layout System** | Built-in floating/stacked panes | Manual split management | No layout support |
+| **Session Management** | Full (list/attach/kill) | Full (list/attach/kill) | None (single process only) |
+| **Plugin System** | WASM-based plugins | Script-based extensions | None |
+| **Learning Curve** | Low (intuitive UI) | Medium (config-heavy) | Very Low |
+| **Default Status Bar** | Yes (informative) | Yes (customizable) | None |
+| **Multiplexing** | Full (panes, tabs, layouts) | Full (panes, windows) | None (single process only) |
+| **Active Development** | Yes | Yes | Maintenance mode |
+| **Binary Size** | ~15 MB | ~4 MB | ~30 KB |
+
+### When to Use Each
+
+- **Zellij** — Recommended for new projects. Intuitive keybindings, built-in layout management, and WASM plugin support make it the most productive choice for modern workflows.
+- **tmux** — Established standard with vast ecosystem. Prefer when working with teams that already use tmux or when existing configs/scripts depend on it.
+- **dtach** — Minimal process detach/reattach without multiplexing. Use when you only need to keep a single process (e.g., a long-running build or dev server) running after you log out, and don't need pane management or session switching.
+
+---
+
+## Zellij
+
+Zellij is a modern terminal multiplexer written in Rust, designed for ergonomics and ease of use. Its default keybindings are discoverable via a floating help pane.
+
+### Key Features
+
+- **Session management** — Create, attach, detach, and kill sessions
+- **Layouts** — Save and restore complex pane arrangements as named layouts
+- **Floating panes** — Overlay panes on top of the tiled layout
+- **Stacked panes** — Stack panes in a single region for quick switching
+- **WASM plugins** — Extend functionality with WebAssembly plugins
+
+### Quick Start
+
+```bash
+# Start a new named session
+zellij --session myproject
+
+# Attach to an existing session
+zellij attach myproject
+
+# List active sessions
+zellij list-sessions
+```
+
+### Keybindings (Default)
+
+| Key | Action |
+| :--- | :--- |
+| `Ctrl+t` | Prefix key (all keybindings start with this) |
+| `Ctrl+t` then `n` | New pane |
+| `Ctrl+t` then `←/→/↑/↓` | Navigate between panes |
+| `Ctrl+t` then `d` | Detach session |
+| `Ctrl+t` then `x` | Close pane |
+| `Ctrl+t` then `?` | Toggle floating help pane |
+
+### CLI Usage
+
+Zellij can be driven entirely from the command line and shell scripts, including controlling sessions running elsewhere on the host. This is the foundation for headless workflows, CI pipelines, and workspace automation.
+
+Every pane exposes its ID through the `$ZELLIJ_PANE_ID` environment variable. Most actions accept `--pane-id` (e.g. `terminal_3`) or `--tab-id` to target a specific element without changing focus.
+
+#### Command Reference
+
+| Command | Purpose |
+| :--- | :--- |
+| `zellij attach --create-background NAME` | Create a headless session without attaching |
+| `zellij --session NAME action <subcommand>` | Issue an action to any session on the host |
+| `zellij action list-panes --json` | List panes with IDs, titles, and metadata |
+| `zellij action new-pane [--name N] -- <cmd>` | Open a pane running a command; prints its pane ID |
+| `zellij action send-keys --pane-id N "Enter" "ctrl c"` | Send keystrokes to a pane |
+| `zellij action paste --pane-id N "text"` | Paste text via bracketed paste (robust for multi-line) |
+| `zellij action dump-screen --pane-id N --full` | Capture a pane's viewport and scrollback |
+| `zellij subscribe --pane-id N --format json` | Stream a pane's output in real time |
+
+:::tip[Prefer paste over typing]
+`action paste` writes text through bracketed-paste mode and is more reliable than `send-keys` when injecting commands into a pane. Follow it with `send-keys "Enter"` to execute.
+:::
+
+#### Run Commands in Panes
+
+`zellij action new-pane` (equivalently the top-level `zellij run`) launches a command in a new pane and prints the new pane ID, which scripts capture to chain follow-up actions:
+
+```bash
+# Open a pane, capture its ID, and start a build in it
+PANE_ID=$(zellij action new-pane --name "build")
+zellij action paste --pane-id "$PANE_ID" "cargo build 2>&1" &&
+zellij action send-keys --pane-id "$PANE_ID" "Enter"
+```
+
+Blocking flags pause the calling shell until the pane's command finishes, enabling sequential scripted pipelines with manual retry:
+
+```bash
+# Retry until tests pass, then build
+zellij action new-pane --block-until-exit-success --name "tests" -- cargo test
+zellij action new-pane --block-until-exit-success --name "release" -- cargo build --release
+```
+
+#### Controlling a Background Session
+
+A background session is created detached and driven entirely from the CLI via the global `--session` flag — ideal for CI or remote automation:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Start a headless session with a compact layout
+zellij attach --create-background ci-runner options --default-layout compact
+
+# Open a pane in that session and run a build
+BUILD_PANE=$(zellij --session ci-runner action new-pane --name "build")
+zellij --session ci-runner action paste --pane-id "$BUILD_PANE" "cargo build 2>&1" &&
+zellij --session ci-runner action send-keys --pane-id "$BUILD_PANE" "Enter"
+
+# Stream build output and surface relevant lines
+zellij --session ci-runner subscribe --pane-id "$BUILD_PANE" --format json \
+  | jq --unbuffered 'select(.event == "pane_update") | .viewport[] | select(test("error|warning|Finished"))'
+```
+
+:::note[Read-only access]
+`zellij watch NAME` attaches to a session in read-only mode — output is visible but no input is accepted, useful for shared observation.
+:::
+
+#### Practical Examples
+
+The patterns above compose into reusable workspace scripts.
+
+**Deep Learning Training Workspace**
+
+A detached, reusable session with dedicated panes for training, GPU monitoring, log inspection, and TensorBoard. Safe to invoke repeatedly:
+
+```bash
+#!/usr/bin/env bash
+# ~/.local/bin/dl-train-startup — start or reattach to the training workspace
+set -euo pipefail
+SESSION="dl-train"
+
+# Create the session in the background only if it doesn't already exist
+if ! zellij list-sessions 2>/dev/null | grep -q "$SESSION"; then
+  zellij attach --create-background "$SESSION"
+
+  # Pane — training run, output tee'd to a log file for inspection
+  zellij --session "$SESSION" action new-pane -- \
+    bash -c "exec python -m my_project.train --config configs/resnet50.yaml 2>&1 | tee train.log"
+
+  # Pane — live GPU utilization
+  zellij --session "$SESSION" action new-pane -- watch -n 1 nvidia-smi
+
+  # Pane — tail the training log
+  zellij --session "$SESSION" action new-pane -- \
+    bash -c "touch train.log; tail -F train.log"
+
+  # Pane — TensorBoard, accessible from your browser
+  zellij --session "$SESSION" action new-pane -- \
+    bash -c "mkdir -p runs && tensorboard --logdir=runs --port=6006 --bind=0.0.0.0"
+fi
+
+zellij attach "$SESSION"
+```
+
+Training continues in the background pane even after you detach or disconnect from SSH.
+
+### Installation
+
+See the official instructions at https://zellij.dev/documentation/installation.html for the most up-to-date options.
+
+#### Via Cargo
+
+Compile the latest release (requires the Rust toolchain):
+
+```bash
+cargo install --locked zellij
+```
+
+If errors occur and Cargo was installed through rustup, run `rustup update` first.
+
+#### Via cargo-binstall
+
+Skip compilation and install a prebuilt binary directly:
+
+```bash
+cargo binstall zellij
+```
+
+#### Via Prebuilt Binary
+
+Download the archive for your platform from the [release page](https://github.com/zellij-org/zellij/releases), extract it, and run the binary:
+
+```bash
+tar -xvf zellij*.tar.gz
+chmod +x zellij
+./zellij
+```
+
+Move the binary to a directory in your `$PATH` to run it from anywhere.
+
+#### Via Package Manager
+
+Zellij is packaged in several third-party repositories, with package status tracked on [Repology](https://repology.org/project/zellij/versions):
+
+```bash
+# macOS
+brew install zellij
+
+# Arch Linux
+pacman -S zellij
+```
+
+---
+
+## tmux
+
+tmux is the most widely adopted terminal multiplexer, established since 2007. It uses a custom configuration DSL and supports extensive scripting via shell commands.
+
+### Key Features
+
+- **Session management** — Attach, detach, and switch between sessions
+- **Windows and panes** — Split terminal into multiple panes and windows
+- **Scriptable** — Full command-line interface for automation
+- **Status bar** — Highly customizable status line
+- **Clipboard integration** — Copy mode with system clipboard support
+
+### Quick Start
+
+```bash
+# Start a new session
+tmux new -s myproject
+
+# Attach to existing session
+tmux attach -t myproject
+
+# List sessions
+tmux list-sessions
+```
+
+### Keybindings (Default)
+
+| Key | Action |
+| :--- | :--- |
+| `Ctrl+b` | Prefix key |
+| `Ctrl+b` then `c` | New window |
+| `Ctrl+b` then `%` | Split vertically |
+| `Ctrl+b` then `"` | Split horizontally |
+| `Ctrl+b` then `Arrow` | Navigate pane |
+| `Ctrl+b` then `d` | Detach session |
+
+### CLI Usage
+
+tmux exposes its full feature set through a command-line interface, so sessions, windows, and panes can be created and controlled from shell scripts — including injecting commands into running sessions without attaching. This makes tmux well suited to boot scripts, remote orchestration, and reproducible development environments.
+
+#### Command Reference
+
+| Command | Purpose |
+| :--- | :--- |
+| `tmux new-session -d -s NAME` | Create a detached session (does not attach) |
+| `tmux has-session -t NAME` | Exit 0 if the session exists (script guard) |
+| `tmux send-keys -t TARGET 'cmd' C-m` | Send a command and Enter to a pane |
+| `tmux new-window -t NAME -n win` | Create a window |
+| `tmux split-window -v -t TARGET` | Split the active pane (`-v` horizontal stack, `-h` side-by-side) |
+| `tmux capture-pane -p -t TARGET` | Print a pane's visible content to stdout |
+| `tmux list-sessions` (`tmux ls`) | List sessions |
+| `tmux kill-session -t NAME` | Terminate a session |
+| `tmux source-file ~/.tmux.conf` | Reload configuration |
+
+Targets resolve in the form `session`, `session:window`, or `session:window.pane`. For reliability in scripts, prefer the most specific target (e.g. `dev:0.1`) or capture the pane ID returned by `new-session`.
+
+:::caution[Avoid the send-keys race]
+`tmux new-session -d` returns before the new pane's shell is ready to read input, so an immediate `send-keys` may be echoed rather than executed. Either pass the command directly to `new-session`, or add a short delay:
+
+```bash
+tmux new-session -d -s dev 'cd ~/projects/myapp && exec bash'   # command runs inside the pane's shell
+# or
+tmux new-session -d -s dev && sleep 0.5
+```
+
+:::
+
+#### Scripted Workspace Setup
+
+A common pattern is an idempotent startup script that reuses an existing session or builds a fresh multi-pane layout detached, then attaches:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SESSION="dev"
+
+# Reuse an existing session if present
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -t "$SESSION"
+fi
+
+# Build the layout detached
+tmux new-session -d -s "$SESSION" -n editor
+tmux send-keys -t "$SESSION:editor" 'cd ~/projects/myapp && vim .' C-m
+tmux split-window -v -p 30 -t "$SESSION:editor"
+tmux send-keys -t "$SESSION:editor.1" 'cd ~/projects/myapp' C-m
+
+tmux new-window -t "$SESSION" -n server
+tmux send-keys -t "$SESSION:server" 'cd ~/projects/myapp && npm run dev' C-m
+
+tmux new-window -t "$SESSION" -n logs
+tmux send-keys -t "$SESSION:logs" 'tail -f ~/projects/myapp/logs/dev.log' C-m
+
+tmux select-window -t "$SESSION:editor"
+tmux attach -t "$SESSION"
+```
+
+#### Remote Control
+
+Because every `tmux <command>` talks to the server over a socket, a running session can be driven from anywhere — including over SSH — without ever attaching:
+
+```bash
+# Restart a service inside a detached session on a remote host
+ssh user@host "tmux send-keys -t api 'sudo systemctl restart api' C-m"
+
+# Inspect a pane's output remotely
+ssh user@host "tmux capture-pane -p -t api:0.0" | tail -n 20
+```
+
+#### Practical Examples
+
+The patterns above compose into reusable workspace scripts.
+
+**Deep Learning Training Workspace**
+
+A detached, reusable session with windows for training + GPU/log monitoring, and TensorBoard. Safe to invoke repeatedly:
+
+```bash
+#!/usr/bin/env bash
+# ~/.local/bin/dl-train-startup — start or reattach to the training workspace
+set -euo pipefail
+SESSION="dl-train"
+
+# Reuse the existing session if present
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -t "$SESSION"
+fi
+
+# Window "train": training top-left, GPU monitor right, log tail bottom-left
+tmux new-session -d -s "$SESSION" -n train \
+  "python -m my_project.train --config configs/resnet50.yaml 2>&1 | tee train.log"
+tmux split-window -h -t "$SESSION:train" "watch -n 1 nvidia-smi"
+tmux split-window -v -t "$SESSION:train.0" "tail -F train.log"
+
+# Window "tensorboard": single pane
+tmux new-window -t "$SESSION" -n tensorboard \
+  "mkdir -p runs && tensorboard --logdir=runs --port=6006 --bind=0.0.0.0"
+
+tmux select-window -t "$SESSION:train"
+tmux attach -t "$SESSION"
+```
+
+Training continues in the background pane even after you detach or disconnect from SSH.
+
+### Installation
+
+```bash
+# macOS
+brew install tmux
+
+# Ubuntu/Debian
+sudo apt install tmux
+
+# Arch Linux
+pacman -S tmux
+
+# Build from source
+git clone https://github.com/tmux/tmux.git
+cd tmux
+sh autogen.sh
+./configure && make && sudo make install
+```
+
+---
+
+## dtach
+
+dtach is a minimal program that emulates the detach feature of tmux or screen. It wraps a single process and allows you to detach and reattach to it, without any session management or multiplexing overhead.
+
+### Key Features
+
+- **Process attach/detach** — Attach and detach a single running process
+- **Minimal footprint** — ~30 KB binary, no configuration files
+- **Zero dependencies** — Pure C, no external libraries
+- **Fast startup** — Nearly instant socket creation
+
+### Quick Start
+
+```bash
+# Start a socket with a shell
+dtach -A /tmp/my_socket
+
+# Start a socket running a specific command
+dtach -A /tmp/build_socket make build
+
+# Reattach to existing socket
+dtach -a /tmp/my_socket
+```
+
+### Command Flags
+
+| Flag | Description |
+| :--- | :--- |
+| `-A` | Create or attach to a socket |
+| `-a` | Attach to an existing socket (fail if none exists) |
+| `-c` | Create a new socket (don't attach) |
+| `-z` | Suppress creation messages |
+| `-r` | Attach in read-only mode |
+| `-e` | Specify escape character (default: `^\\`) |
+
+### Installation
+
+```bash
+# Ubuntu/Debian
+sudo apt install dtach
+
+# Arch Linux
+pacman -S dtach
+
+# macOS
+brew install dtach
+
+# Build from source
+git clone https://github.com/crigertyp/dtach.git
+cd dtach
+./configure && make && sudo make install
+```
