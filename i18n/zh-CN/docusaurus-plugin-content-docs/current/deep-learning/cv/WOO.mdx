@@ -1,0 +1,136 @@
+---
+title: WOO
+sidebar_position: 1
+---
+
+🧩🧩🧩
+
+![WOO图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image1.png)
+
+## 一、	WOO核心思想
+用一个统一网络，一次看视频完成目标检测和动作识别，不需要任何后处理，模型能够直接输出给定视频剪辑的动作边界框和动作类别。
+## 二、	问题背景：
+### 1.	摘要：
+> *我们提出了一个端到端的流程，名为 Watch Once Only (WOO)，用于视频动作检测。当前的方法要么将视频动作检测任务拆分为动作人定位和动作分类的独立阶段，要么在一个阶段内训练两个独立的模型。相比之下，我们的方法在统一的网络中同时解决演员定位和动作分类问题。通过统一主干网络并消除许多手工设计的组件，整个流程被显著简化。WOO 使用统一的视频主干网络，同时提取用于演员定位和动作分类的特征。此外，我们在框架中引入了时空动作嵌入，并设计了一个时空融合模块，以获得信息更丰富、更具判别力的特征，从而进一步提升动作分类性能。在 AVA 和 JHMDB 数据集上的大量实验表明，WOO 实现了最先进的性能，同时相比现有方法最多可减少 16.7% 的 GFLOPs。我们希望我们的工作能够启发对动作检测常规方法的重新思考，并作为端到端动作检测的坚实基准。*
+
+- **FLOPs** 表示模型一次前向推理需要多少次浮点运算
+- **GFLOPs** 表示10的9次方次浮点运算，越高模型越重，推理越慢，显存占用更高。
+### 2.	视频检测本质包括两个子任务：人在哪里，人在做什么
+核心矛盾：单帧有利于检测，多帧有利于动作识别
+### 3.	传统方法（论文中主要和WOO进行比较）：🧩🧩🧩
+
+![WOO图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image2.png)
+
+YOWO属于一个stage+两个backbone，仍需要完成 2D CNN 检测和 3D CNN 动作。这一篇 WOO 可以与 YOWO 做对比，WOO 认为 ：
+- YOWO 架构（a）实际上是一个 two-stage 架构，将检测和分类模型在单一训练阶段中联合训练。尽管流程某种程度上被简化，依然需要独立从原始图像中提取特征。
+- 而WOO文章的目的就是只使用一个backbone完成真正的 end-to-end 架构（b）。现有方法复杂且独立的流程阻碍了视频动作在现实世界中的可扩展性和实用性。
+ 
+### WOO的创新在于，只是用一个backbone，一次前向传播完成所有任务。
+---
+## 三、	WOO的结构
+
+> [!INFO]
+> WOO 由三个关键组件组成，包括统一的骨干网络、时空动作嵌入以及时空知识融合机制。
+
+### 1.**统一的骨干网络**：
+由一个 backbone 同时处理时间和空间信息，关键设计在于提取 Key Frame 用于检测而同时保留了 temporal feature 用于动作。 🧩🧩🧩
+
+![WOO图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image3.png)
+
+- 图 a 表示传统的 Separate Backbone，图中右侧的 3D video backbone 是分层提取特征的，经过Res3，Res4（ResNet第4阶段。每经过一个Stage 特征图的尺寸会变小，感受野变大，语义信息增强）。
+- 列表项DC5 这里的DC5表示的是最后一个stage使用了dilated convolution（空洞卷积，表示再卷积核中插入空洞，参数量不变但是可以让感受野变大。不是主流用的）目的是保持更高的空间分辨率，因为常见增大感受野的方法一般是pooling stride=2 但是这样会导致特征图变小，分辨率下降。
+> 传统动作识别经常使用DC5的原因在于，很多目标很小，为了保留更多的细节使用空洞卷积。<u>但是注意 WOO 没有用 DC5，</u>因为除了分类，WOO还要同时完成检测的任务，而作者发现随着网络加深，关键帧就会不断地和临近的帧进行混合，这样就会导致干净的空间信息被时间信息污染。
+```
+Frame5 = Frame4 + Frame5 + Frame6 
+```
+
+ - 图 b表示WOO的Unified Backbone保留一个统一的video backbone，在其中抽取key Frame作为关键帧特征代替了2d检测的任务定位功能。
+- **两个backbone差异的问题：**
+传统的方法认为检测和分类是差别很大的任务，所以分成了两组完成任务，第一组专门用于看一帧图片，做检测任务，输出检测到的bounding box，也就是左侧的2D Person Detection Backbone。而第二组，多个帧的视频输出整体的动作分类，本质可以理解为同一个Key Frame看了两遍。
+而WOO认为可以让同一个backbone同时做两个任务。检测只需要一帧就可以知道人在哪里，而动作识别需要多个连续的帧要看连续的动作，所以在WOO的内部同一个backbone 产生的特征Res3、Res4和Res5 其中Key Frame被抽出来送给检测头，而完整的视频特征继续往上送到动作分类头。某一层Stage负责动作分类，FPN负责目标检测，而FPN的输入来自Res3、Res4、Res5等多层特征融合
+而最终FPN做的事情就是把Res3、Res4和Res5全部融合。
+- **WOO的解决方案：**
+形式上设
+> $X \in \mathbb{R}^{C \times T \times H \times W}$
+
+表示特定曾的输入时空特征图，其中C表示通道数，T表示时间。将关键帧放在视频剪辑的中间位置。
+使用
+> $X_t = X[T/2] \in \mathbb{R}^{C \times H \times W}$
+
+来表示关键帧特征图。
+让网络早期就把key frame特征分离出来，设计了一个简单模块让单一骨干网络能为动作人定位头和动作分类头提供特定任务的特征图，该模块轻量化在于早期阶段把关键帧特征和所有帧的特征分离。动机是随着模型加深，关键帧特征与其他帧的互动会增多。
+然后在抽取的关键帧上引入一个轻量的FPN模块输出多尺度空间特征用于Actor localization检测，代替了传统的额外2D检测网络。
+### 2.	时空动作嵌入
+行为分类方面难度大于定位，因此怀疑一个主干同时用于两个任务会偏向于定位，从而影响分类的性能。
+> 论文原文：“我们发现统一架构对于定位表现不错，但动作分类仍然受限。因此我们怀疑同一个主干同时服务两个任务时，会偏向于定位任务，从而影响动作分类效果。”
+
+基于这个观察作者认为统一backbone之后分类特征不具有区分性,于是提出了额外增强分类分支，空间与时间行为嵌入以及他们之间的交互机制，以使行为分类特征在空间和时空维度更有区分性。
+
+### 3.	时空融合模块
+位于动作分类头内部，将空间和时间知识进行整合，通过时空融合模块，将空间的属性比如形状和姿态，以及时间属性如运动和行为的时间尺度通过Fusion模块结合起来以生成用于分类的特征。
+### 4.	Actor Localization Head（用来找人空间位置的检测头）
+
+-  这个检测头借鉴了 Sparse R-CNN（现代端到端的方法）
+-  输入前面来自key frame→FPN的多尺度特征，输出bounding box和confidence score。
+- 在训练阶段使用了set prediction loss进行预测与真实值之间的最佳二分匹配并且在评估阶段不需要后处理
+（例如NMS，这里是继承了Sparse R-CNN的思想 一个GT，一个Prediction，训练阶段就完成了最佳匹配所以测试的时候不会出现10个框同时框住一个人）。同时与双骨干方法也不同，不需要额外的预训练因为任务检测和动作分类共享同一个骨干网络。
+- Set prediction只是预测一组固定数量的框让他们直接等于最终结果
+```
+GT（真实框）：3个人 
+模型预测：5个框 
+set prediction 做的是给每个GT找一个“最匹配的预测框” 
+Bitpartite matching 就是预测框和GT框一一匹配，不会出现多个预测框对应同一个人。
+```
+### 5.	Action Classification Head（对动作识别的分类头）
+🧩🧩🧩
+
+![WOO图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image7.png)
+
+```
+对每个前面人体检测器检测到的人 → 使用RoI Align（特征图裁剪器）分别提取空间信息 + 时间信息 →
+用attention让不同人交互 → 融合 → 分类
+```
+
+- 输入Res5的特征（CTHW）本质是视频的时空特征，这个Res5 Feature是整个8帧输入视频经过backbone最后一层得到的特征图。RoI Feature的目标是从整个Feature Map中把这个人的特征裁剪出来，统一变成S x S。输入检测box 输出ROI Feature（CTSS）只关注这个人的区域，然后分成两条分支空间和时间嵌入时空特征表达能力让模型更容易区分动作。
+-	蓝色temporal时间行为特征 对空间HW做pooling保留时间变化丢掉空间信息。
+-	绿色spatial 空间行为特征沿着时间T做pooling 保留空间结构，其中SxS是RoIAlign的空间输出尺寸
+-	但是如果仅仅是简单的把Spatial 和Temporal直接拼接就太简单了，所以又引入了Embedding Interaction嵌入交互。 是为了获得更多可区分的特征，进一步引入空间和时间嵌入，与前面的空间时间特征及逆行卷积，获得丰富的实例特征。
+> 论文原文“ Note that the embedding is exclusive for each of the N features. Thus, we define Es ∈ RN×d,Et ∈ RN×d for spatial and temporal embedding.”
+-	Spatial Embedding为例子，我们有了当前ROI的空间特征，作者也希望模型可以额外记住这是空间特征，于是加了Spatial Embedding。底部的embedding理解为每个人的空间向量，用来表示RoI之间的空间关系，Interaction模块的架构也就是attention的结构类似transformer attention，然后经过linear得到Q，K，V。 左侧表示矩阵乘法得到不同actor之间的相关性，得到Attention Score，例如A-B=0.9，而A-C=0.1就表示A更应该关注B，因为A和B正在互动。
+然后经过Scale $\frac{QK^{T}}{\sqrt{d}}$
+如果维度很大，数值也会很大，此时的Softmax梯度也会很差，所以用Scale ,可以让数值稳定。
+以及Softmax *（Softmax是经过Scale之后Softmax得到Attention Weight表示谁最值得关注）*
+得到Attention权重再与v相乘得到交互后的embedding输出，然后作用在右侧的spatial feture增强每个人的spatial feature。
+---
+ 🧩🧩🧩
+
+![WOO图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image9.png)
+
+为了捕获不同人之间的关系，作者设计了这个Interaction module，我们前面已经有了这个人的时间和空间特征，但是作者认为 ：
+
+ **只用当前人的特征是不够的，因为视频里往往还有多个人，同时看到多个人的动作也许更容易判断视频分类。** 
+### 6. Embedding
+为了节省计算量，WOO不用feature 做交互而是直接用轻量embedding做attention。
+> 原文：“The embedding is lighter compared to the feature map, we adopt the attention mechanism between embedding instead of feature maps for efficiency.”
+
+作者认为真正需要建立关系的不是Feature的细节而是Actor之间的关系，在Embedding 之间做Attention，得到关系信息，直接融合回Feature就结束了，没必要让Attention全部参与。
+> [!WARNING]
+> 但是如上文所说论文中没有明确画出embedding生成的方式，只是说了:
+**"The embedding is exclusive for each of the N features."**
+
+- 列表项WOO并没有完全放弃Feature，而是避免直接在高维Feature之间进行Attention交互。作者为每个Actor引入轻量级Spatial/Temporal Embedding，并仅在Embedding空间中完成Actor关系建模。得到交互后的Embedding后，再通过1×1卷积将关系信息融合回原始Feature中，从而增强动作分类能力。因此，节省计算量的关键并不是“先筛选再做Feature Attention”，而是整个Attention过程始终只发生在轻量Embedding层，而不是高维Feature层。
+### P.S. 对Attention的理解	
+**1.Attention**
+本质在于帮助模型决定该关注什么，权重更高的表示更加重要。
+**2.CNN Attention**
+以CBAM为例子，CBAM只能看到一个256*8*8的Feature而不知道具体的人，所以关注的是哪个通道和哪个区域更重要，会学习关注人忽略背景，所以CNN Attention 关注的是Feature 内部的重要性。
+**3.LLM Self-Attention**
+Self-Attention 是让每一个元素（Token）去看看其他所有元素，从而决定自己应该重点参考谁。
+与CBAM不同的是它知道不同的人Actor A，ActorB….而计算的是人与人之间是由多少关系。WOO Figure4中的Attention更接近LLM的 Self Attention。
+**这一篇是LLM的self-attention 上一篇YOWO用的是CNN attention。**
+🧩🧩🧩
+
+![WOO图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image10.png)
+ 
+
+

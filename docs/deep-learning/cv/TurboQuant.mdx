@@ -1,0 +1,101 @@
+---
+title: TurboQuant
+sidebar_position: 1
+---
+
+ 🧩🧩🧩
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image1.png)
+
+## Why TurboQuant Is Needed
+TurboQuant, released by Google in March 2026, is a compression algorithm (Lossy). It can compress the key runtime memory usage of large models (KV Cache) to 3-bit without losing model accuracy, reducing memory usage by 6 times while increasing inference speed by up to 8 times. This means the cost of AI inference can drop dramatically.
+ 🧩🧩🧩
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image2.png)
+
+**The degree of zip compression mainly depends on the content of the file.**
+###  KV Cache
+KV Cache can be understood as the cache used by a Transformer to remember past information during inference.
+Taking a large Transformer model as an example, the model generates text step by step:
+ 🧩🧩🧩
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image3.png)
+
+Every time a new token is generated, Attention (Q, K, V) must be recomputed. To avoid repeated computation, the K and V of historical tokens are cached, which is the KV Cache. However, when the context window expands to the million-token level, the KV cache quickly expands. The GPU memory it consumes can even far exceed the model weights themselves, causing GPU memory to be quickly exhausted (OOM), greatly limiting the number of concurrent requests and becoming the biggest memory bottleneck for AI inference.
+###  Memory Usage Example
+ 🧩🧩🧩
+
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image4.png)
+
+This is why long-context inference has always been the biggest cost bottleneck for commercializing large models. A 1M-token context requires 1 TB of GPU memory for KV Cache alone, making the cost extremely high.
+##  Core Idea of TurboQuant
+- **The hidden cost of traditional compression:** The earliest compression method directly divided data into several bins, and each data value recorded the index of its corresponding bin. This directly saved the space required to record every data value one by one. However, we also need to write an additional description explaining what each bin specifically represents. This "description" is the extra overhead in traditional compression. Its length is fixed. No matter how short the compressed main content becomes, this description still occupies the same amount of space. This is the awkward part of traditional compression: the harder you compress, the more likely the stored "description" becomes larger than the "content", wasting a large amount of space on the description.
+- The core breakthrough of TurboQuant: it significantly reduces additional storage overhead.
+- TurboQuant is essentially an ultra-low-bit online quantization method for KV Cache. Unlike traditional methods that reduce computation through pruning, token selection, or attention dropping, TurboQuant preserves the complete Attention structure, but compresses KV vector storage through extremely low-bit quantization, thereby significantly reducing GPU memory usage during inference.
+**It divides KV vector compression into two independent stages:**
+```
+- Main quantization stage: uses PolarQuant (random rotation into a Gaussian distribution + 3/4-bit quantization)
+ - QJL error correction stage: because ultra-low-bit quantization still introduces Attention inner-product error,
+  TurboQuant further uses sign sketch (symbol encoding) based on JL projection to provide an unbiased estimate of quantization error.
+  QJL does not directly recover the original vector. Instead, it approximately recovers the Attention inner product with extremely low additional overhead, thereby preserving inference accuracy.
+```
+###  Random Rotation
+- **Traditional quantization (such as INT8)** maps floating-point numbers to low-bit integers. The error concentrates in the "tail" of the value distribution. If the value of one dimension is abnormally large, quantization accuracy drops sharply.
+> - Intuition: imagine a glass of freshly squeezed orange juice in front of you. The pulp has sunk to the bottom, clear juice is on top, and the middle is somewhat cloudy. If you directly scoop one spoonful to taste it, the flavor depends on which layer you scooped from; every layer is different and very uneven. But if you shake it hard first, the juice becomes uniform. At that point, no matter where you scoop from, the taste is about the same.
+
+- The subsequent solution idea of PolarQuant is to perform a random orthogonal rotation on the vector before quantization.
+- **Mathematical principle:** an orthogonal rotation does not change the L2 norm (Euclidean distance) of a vector, so it does not affect the relative size of attention scores. After rotation, the variance of each dimension tends to become uniform, eliminating the concentration of quantization error caused by abnormally large values. Rotate x and y separately: zx=Qx and zy=Qy. Using the same Q keeps the norms of x and y unchanged. After rotation, the inner product also remains consistent with the original xy. The similarity between vectors has not changed; only the coordinate system has changed.
+- **Effect:** achieves near-zero accuracy loss at 3-bit precision.
+
+ Method for reducing KV Cache (random rotation to a Gaussian distribution)
+The original KV vectors have some dimensions with extremely large values and some with very small values, with an irregular distribution. To fit that extremely large value, the quantization grid is stretched very large, while small values are squeezed into the same grid and cannot be distinguished, causing severe information loss.
+> [!INFO]
+> https://www.youtube.com/watch?v=7V0Vt2QzMDk
+ 
+🧩🧩🧩
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image5.png)
+
+- Suppose the input is xy and the codebook is c1 and c2. No matter what, we need to find which c is closer to xy (note that the following is only a three-dimensional vector example).
+- Suppose the word "caleb" is represented by [8.0, 0.1, -0.1]. We can see that this number fluctuates greatly, so we can first find the norm of this word, obtaining 8.001. This value represents the magnitude of the vector. Then we divide each component by 8.001 and obtain the unit vector [1.0, 0.0012, -0.012]. Although it has become a unit vector, the first number, 1.0, is still very sharp compared with the other two; only the scale has become smaller. Therefore, what we essentially want to do is distribute the highly concentrated energy contained in the 1.0 value more evenly. The method is to multiply this vector by a 3*3 random matrix and rotate it, so that the energy of the original vector is evenly distributed. The final result looks like [0.58, 0.69, 0.42].
+ 🧩🧩🧩
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image6.png)
+
+- This operation looks like turning the energy we originally know into something unknown, but the process itself actually takes us from the unknown into the known. Its principle is related to how the limit theorem works.
+- **How the limit theorem works:** under appropriate conditions, the distribution of the standardized version of the sample mean converges to a Gaussian distribution. According to the dimensionality, we can obtain distributions of different shapes. In our example, because there is a three-dimensional unit vector form, we can obtain a Gaussian distribution with μ equal to 1/√3 and variance equal to 1/3. We fit inputs containing many random peaks into a Gaussian distribution. Within this range, it becomes much easier to construct the corresponding codebook. Because the actual dimensionality is larger, the Gaussian distribution will also be more concentrated.
+🧩🧩🧩
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image7.png)
+
+Turning vectors into a Gaussian distribution is meant to make the data arrangement more regular, so fewer bits can be used for storage, reducing KV Cache. The data now becomes 100% standard Gaussian distribution. We do not need to inspect the specific data; we already know the statistical pattern of this batch of data in advance, so we can compute a set of quantization bins that better fit the data requirements (Max-Lloyd quantizer).
+###  PolarQuant - Polar Coordinate Transform Quantization (key step 1, responsible for the main compression)
+- In the traditional Cartesian coordinate system, a two-dimensional vector needs to be represented by two components, (x, y), which means two independent pieces of numerical information must be stored. In a polar coordinate system, the same vector can be represented as a distance r (vector length) and an angle θ (direction information).
+The key advantage of this representation is:
+```
+ Concentrate information in the r part.
+Essentially: information distribution is uneven (information anisotropy)
+In vectors: energy is mainly concentrated in "length", while direction is only a fine adjustment
+```
+- Therefore, TurboQuant first randomly rotates the data, then converts the coordinates to a polar coordinate system, and finally quantizes the angle rather than the length:
+```
+Preserve r (length) with high precision
+Compress θ (angle) more aggressively
+```
+- Mathematical principle: the real compression happens in θ angle quantization. The 8-dimensional Cartesian components after rotation are grouped in pairs and converted into polar coordinates.
+ 🧩🧩🧩
+
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image8.png)
+
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image9.png)
+
+Separate r (main information) and θ (secondary information) to create conditions for later compression. All θ distributions are fixed uniform distributions, so no scale, mean, or calibration parameters are needed. A universal codebook (1 bit) can be used directly.
+ 🧩🧩🧩
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image10.png)
+
+- TurboQuant can be understood as a KV Cache compression module for the Transformer inference stage. Because Transformer Attention computation depends on the inner-product relationship between Query and Key in the original embedding space, the compressed KV vectors need to be decoded into approximate original vectors so they can participate in Attention computation.
+The approximate compressed vectors x1 and y1 obtained by dequantization convert the index back to the center point, restore polar coordinates, convert back to Cartesian coordinates, and finally inverse-rotate back to the original space to compute the main inner product. However, the main inner product calculated this way is not accurate enough. The solution is to compute the residual and hand it to the subsequent QJL processing, recovering the error at extremely low cost.
+###  QJL Error-Correction Layer (key step 2, processing residuals left by the previous stage)
+This is closely related to the attention score. Because the codebook generated in step one introduces some bias, in the second step they step back, reduce quantization by one bit, find the residual error in the mean squared error, and then apply the QJL algorithm to guarantee the completeness of the dot product.
+🧩🧩🧩
+
+![TurboQuant architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image11.png)
+
+###  Experimental Results
+From the LongBench benchmark results, we can see that TurboQuant shows extremely strong robustness in KV Cache compression tasks. When the KV bit count is only 3.5, its performance (50.06) is almost identical to Full Cache (16-bit), achieving near "lossless compression".
+By contrast, other methods such as KIVI need a higher bit count (5-bit) to reach similar performance, while the scheme using only PolarQuant (without error correction) shows an obvious performance drop. This indicates that the QJL error correction module plays a key role in TurboQuant.
+

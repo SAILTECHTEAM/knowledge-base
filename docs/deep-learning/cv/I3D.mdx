@@ -1,0 +1,86 @@
+---
+title: I3D
+sidebar_position: 1
+---
+
+🧩🧩🧩
+![I3D architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image1.png) 
+
+##  Background: two contributions
+###  A new model, I3D, was proposed
+How can a 2D model be expanded into a 3D model?
+We hope to directly use a well-developed 2D video understanding model. This not only makes the design simple, but also avoids the trouble of pretraining.
+###  The Kinetics Dataset was designed
+The Kinetics Dataset has relatively balanced categories and moderate difficulty. The video field lacked a good dataset that would let researchers study video understanding frameworks well. The authors of this paper proposed that video models are still best pretrained on video. This paper first proposes a visual model, and then trains the new model on existing video datasets.
+ 🧩🧩🧩
+![I3D architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image2.png)
+
+If we only look at a single image, we cannot accurately distinguish the action.
+
+##  Preliminary Related Work
+###  EfficientNet
+- **Paper address:** https://arxiv.org/abs/1905.11946
+This is also a network scaling method proposed by Google. It uses a compound coefficient to uniformly scale the number of network layers, the number of channels, and the input image size (resolution).
+- The main core idea is that networks often require hyperparameter tuning, but can we treat the network itself as a parameter to tune, and search for the best channel count, depth, and resolution?
+	- **Depth** A deeper network can extract richer features and has stronger understanding ability. However, being too deep can also cause gradient vanishing. Although BN can alleviate these problems, the accuracy gain will decrease. It may see the whole image, but still may not understand it.
+  - **Width** Width is the same. In theory, it can capture more channels, which can also be understood as having more viewing perspectives. However, if the depth is very shallow, it cannot obtain high-level features and can only stay at low-level features, failing to learn high-level semantics. Because features from different channels have not mixed well enough, width will also saturate.
+  - **Resolution** In theory, higher resolution can also show more information, but if the resolution is too high, the computation will grow explosively. Many details may not help classification much, and there will also be saturation.
+ 🧩🧩🧩
+![I3D architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image3.png)
+
+We can observe that network depth, width, and resolution influence each other. Therefore, balancing these three parameters is one of the key factors for pursuing higher accuracy. Can we adjust them at the same time?
+- Use a fixed set of compound coefficients ϕ
+
+For example: if the computing resources are 2^N times larger, increase the network depth, width, and resolution respectively by
+
+**α<sup>N</sup>, β<sup>N</sup>, and γ<sup>N</sup> times**
+🧩🧩🧩
+![I3D architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image4.png)
+
+Here α, β, and γ are constants determined by small grid search on a small model. They are used to simplify the model into a base and scale down the model.
+###  Optical flow
+**Calculates the displacement of frames and is used to detect object movement. Because the difference between two frames is usually not too large, it can reduce the effect of jitter.**
+1)	**Ideal conditions:** brightness remains constant, time is continuous, and the background does not change drastically.
+ 🧩🧩🧩
+![I3D architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image5.jpeg)
+
+The role of optical flow is useful when the focus of our task is to observe the displacement of moving objects over time. If there is no moving target in the image, then the optical-flow vectors across the entire image are simply points with no motion. When motion appears in the image, the target and the background have relative motion. The velocity vector formed by the moving object must differ from the velocity vector of the background, allowing the position of the moving object to be calculated. For every pixel in every frame, the movement vector to the second frame is calculated, so the computation is actually very large.
+**2)	Disadvantages:** The optical-flow field does not necessarily reflect the actual motion of the target. Its assumption is constant brightness, so optical-flow methods are sensitive to lighting. When the light source and the object have relative motion, optical flow will be generated, so changes in lighting can easily affect recognition performance.
+##  I3D
+### 	
+ 🧩🧩🧩
+![I3D architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image6.png)
+
+![I3D architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image7.png)
+
+###  Architecture a)
+ This is a CNN+LSTM video understanding architecture. The CNN can only look at a single image, and the LSTM is added to model temporal relationships. It still mostly treats a video as an image problem. The feature extraction process is completely separate, and then all the content is thrown into the LSTM. The final timestamp is sent to a fully connected layer, which maps the features to class probabilities and finally outputs the classification probability. However, in real video actions, temporal and spatial information should influence each other, so this method does not perform well on video datasets.
+###  Architecture b)
+This is a 3D convolutional network that treats consecutive video frames as a 3D Volume. It divides a video into video clips (1-k), and then treats each clip as a volume, including time, height, and width. Because the 3D feature map is large, pooling layers are used to reduce computation while retaining the main information, and fully connected layers are used for final classification. However, the problem with this model is that ordinary 2D CNNs can be pretrained on ImageNet, while this C3D model cannot directly inherit weights from 2D pretraining. Training from scratch may lead to difficult training, overfitting, and increased parameters.
+###  Architecture c) two-stream network
+ The way to add temporal information is to use optical flow to compute motion information in advance and learn the mapping relationship. Both networks are 2D. With a pretrained 2D CNN, the temporal information is handed over to optical flow, so temporal modeling ability can be obtained without using 3D convolution. However, optical flow itself should not be understood as the temporal axis in true 3D convolution. It is precomputed pixel movement information: motion is calculated in advance and then learned by the 2D CNN. The difference from a) is that LSTM needs to remember changes between previous and later frames by itself, while two-stream has already computed the motion and can directly learn motion patterns. Its temporal modeling is stronger, but it is still result-level fusion.
+###  Architectures d) and e)
+Both are models that combine spatial RGB information and temporal optical-flow information. The difference lies in the position and method of fusion.
+###  Supplement for model d)
+Because the two-stream method in c) has a problem: optical flow must be computed in advance, meaning an extra optical-flow process is required, model d) was constructed. In d), two independent 2D convolutions (two-stream network) are first used to extract RGB and optical-flow features. But unlike c), which directly adds them, d) stacks high-level feature maps into a spatiotemporal feature volume and sends the result into a small 3D convolutional network for temporal modeling. The two features are combined before the final result is produced. However, computing optical flow is also very heavy, and adding another 3D convolution at the end makes the whole process heavy.
+###  Model e)
+**This is I3D (Inflated 3D Convolutional Neural Network technology)**. RGB and optical flow each enter independent 3D convolutional networks. Each branch extracts spatial and temporal features at the same time, and the results are fused at the end. Therefore, it is:
+> "Each branch independently performs spatiotemporal modeling, and then result fusion is performed."
+
+Combining them provides the richest information.
+###  ImageNet Dataset
+Its benefit is not only that it can train deep neural networks. After pretraining on such a large-scale dataset, features can be extracted and effectively transferred to other tasks. However, in the video domain, large-scale dataset pretraining followed by transfer and fine-tuning on smaller datasets has not yet been fully adopted.
+##  Method
+###  How to perform inflate:
+- Keep the overall architecture unchanged. Change 2D convolutions into 3D convolutions, and directly change 2D pooling into 3D pooling. NxN filters become NxNxN.
+
+- By repeatedly copying an image into a video sequence, the image is converted into a video where every frame is the same, allowing the 3D network to integrate the ability of the 2D network.
+###  Bootstrapping 3D filters from 2D:
+> How to initialize a 3D model from a pretrained 2D network model.
+
+- Usually, when initializing our model, the way to verify the initialization method is to give an input, run it once on the original model, and then run it once on the initialized model. In theory, the results should be the same.
+- The paper repeatedly copies and pastes the same image into a video, meaning a video where every frame is identical is used as the training video input.
+- For the specific training method, the authors also copy all 2D filters n times, so they correspond to the input video.
+
+
+

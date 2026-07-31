@@ -1,0 +1,299 @@
+---
+title: YOWO
+sidebar_position: 1
+---
+
+# YOWO
+
+
+
+**論文名稱：**
+
+You Only Watch Once (YOWO): A One-Stage Network for Real-Time Spatio-Temporal Action Detection
+🧩🧩🧩
+
+![YOWO框架圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image1.jpeg)
+
+**論文鏈接：** https://arxiv.org/pdf/1911.06644.pdf
+
+
+# 問題背景❔
+🧩🧩🧩
+
+![YOWO框架圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image2.jpeg)
+
+
+從名字 **YOWO（You Only Watch Once）** 可以看出，它與 YOLO（You Only Look Once）有一定關係。
+
+ **核心思想：**
+YOLO：一階段目標檢測
+YOWO：一階段時空動作檢測
+
+---
+## 什麼是時空動作檢測（STAD）
+
+
+
+ **傳統的視頻分類**（Video Classification）任務以整段視頻作為輸入，輸出視頻對應的動作類別，例如跑步、游泳或打人等。
+
+輸入：
+
+```text
+整段視頻
+```
+
+輸出：
+
+```text
+跑步、游泳、打人
+```
+
+它只能回答：
+
+```text
+視頻中發生了什麼動作？
+```
+
+但無法回答：
+
+```text
+是誰在做動作？
+動作發生在哪裏？
+```
+
+因此，對於多人場景中的行為分析，僅依靠視頻分類已經無法滿足實際需求。
+
+
+
+- **引出新任務：Action Detection**
+
+為了同時獲得動作類別和動作位置，研究者提出了行為檢測（Action Detection）任務。
+
+其本質可以表示為：
+
+```text
+Action Detection = Localization + Classification
+```
+即同時完成：
+
+```text
+Where + What
+```
+
+同時回答：
+
+```text
+哪個人現在做了什麼動作
+```
+
+
+
+---
+
+## 為什麼以前的方法不夠理想
+
+在 YOWO 提出之前，大多數時空動作檢測方法採用 Two-Stage 結構，其整體流程與 Faster R-CNN 類似。也就是先產生proposal（候選區域），再做分類和迴歸。這類做法收到Faster R-CNN 一類檢測器影響很大。
+
+基本流程如下：
+
+```text
+Proposal Generation
+↓
+Classification
+↓
+Regression
+```
+
+雖然能夠獲得較好的檢測精度，但存在以下幾個問題。
+
+### 問題1：流程複雜
+
+需要經過多個步驟：整個訓練與推理流程較為繁瑣。
+
+```text
+生成候選框 -> 篩選候選框 -> 動作分類 -> 邊界框迴歸
+```
+
+### 問題2：參數量大
+
+時空動作檢測本身已經需要同時建模：
+
+```text
+空間信息 + 時間信息
+```
+
+而 Two-Stage 結構又引入額外的檢測模塊，導致模型參數量和計算量進一步增加。
+
+### 問題3：推理速度慢
+
+視頻任務需要同時處理：
+
+```text
+T × H × W
+```
+
+即時間維度與空間維度的大量數據，因此 Two-Stage 方法往往難以滿足實時檢測（Real-Time Detection）
+
+- **正是在這樣的背景下，YOWO 借鑑 YOLO 的 One-Stage 思想，提出了一種端到端的時空動作檢測框架，在保證檢測精度的同時顯著提高了推理速度，為實時行為檢測提供了新的解決方案。**
+
+# 核心思想
+
+## 目標
+
+
+同時完成：
+
+```text
+空間定位（Object Detection）+ 行為分類（Action Classification）
+```
+
+---
+
+## 關鍵難點
+
+*行為並不等於單幀信息*🧩🧩🧩
+
+![YOWO框架圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image3.jpeg)
+
+
+```text
+行為 = 空間信息（Appearance）+ 時間信息（Motion）
+```
+
+- 如果沒有時序，只看一幀凸顯可能就會陷入動作識別的困難中必須藉助附近幾幀所作的連貫動作來判斷這一段內容的類別。
+- 列表項與空間信息相比，時序的挑戰更大，如何高效構建在連續幀當中的時序關聯是很重要的，對於視頻理解任務來説，很多工作都採用的3D CNN基數來構建動作檢測網絡，3D CNN的作用就是輸入一段視頻，抽取時空特徵然後交給後續的檢測頭處理。 這些工作可以分為兩類：two-stage或端到端檢測 但不論是哪一種，都面臨一個重要的問題：參數量很大且計算速度極慢。
+
+
+動作實際上來自：
+
+```text
+連續運動過程
+```
+
+而不是某一幀靜態圖像。
+
+---
+
+
+# 整體架構
+為了解決以上問題，YOWO在已有的3D CNN（用來實現時序建模能力）基礎上，同時把輸入的尺寸變小。然後選擇了結構比較簡單的空間建模方式（論文中提到直接使用了結構簡單的YOLOv2來處理），最後設計了一個基於自注意力機制的模塊CFAM來融合以上兩種特徵，最後加一個邊界框迴歸部分，網絡架構如下圖所示。
+🧩🧩🧩
+
+![YOWO框架圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image4.jpeg)
+
+
+- 下分支 YOLOv2（或其他的YOLO-like模型）：基於單幀進行空間定位
+
+- 上分支（3D CNN）：時間建模（Temporal Modeling）+行為分類（Action Classification）
+
+
+
+# 空間建模方式（2D CNN）
+**Key Frame機制，論文中説Keyframe是輸入片段的最後的一幀，是一個因果結構，因此不需要額外的數據加載器。使用了2D backbone（Darknet-19也是yolov2的backbone），給定一張關鍵幀，提取空間特徵，維度變成[C’’, H’, W’]，H’與W’同3D-CNN的維度，實際是直接將目標檢測領域中的簡單模型遷移過來。**
+- 核心思想：每次只預測一個關鍵幀,利用了長時特徵庫，通過對整個視頻使用訓練好的3D-CNN提取非重疊8幀剪輯的特徵。
+- Sliding Window（滑動窗口）
+  ```text
+  訓練方式：每一幀都可以作為 key frame
+  第一次：
+  [t-7 ~ t]
+  檢測 t
+  下一次：
+  [t-6 ~ t+1]
+  檢測 t+1
+  …
+  但是每一個窗口依然檢測最後一幀，而不是中間幀。
+
+  ```
+
+# 時序建模方式（3D CNN）
+
+- 普通CNN：只建模空間信息（H x W）。
+
+
+- 3D CNN：
+
+```text
+ 處理：空間 + 時間（T × H × W）多出來維度T。輸出的特徵維度壓縮為與2D分支一致的空間大小。
+```
+- 論文框架中的3D-CNN基本架構是3D-ResNext-101，使用得數據集為I3D論文中提到得Kinetics，給定一段視頻片段，3D backbone會輸出一個包含了大量時空特徵的特徵圖。3D網絡的輸入是視頻片段，它由按時間順序排列的一系列連續幀組成，形狀為[C × D × H × W]，而3D ResNext-101的最後一個卷積層輸出的特徵圖形狀為[C × D × H × W]，其中C=3，D是輸入幀的數量，H和W是輸入圖像的高度和寬度，C是輸出通道數，D=1，H=H/32，W=W/32。輸出特徵圖的深度維(D)被壓縮為1，使輸出體積被壓縮到[C × H × W]，以匹配2D-CNN的輸出特徵圖。
+
+ * 但是與TSM相比計算量更大更重。*
+
+
+# Attention模塊（CFAM模塊，對應整個Figure 3）
+
+YOWO採用了通道融合+注意力機制的方案，先獲得的3D特徵與2D特徵Concat，然後使用1*1卷積和3*3卷積進行處理，輸出融合後的特徵F。但是隻是簡單的融合是不充分的，於是YOWO又增加了一個CFAM子注意力模塊。
+🧩🧩🧩
+
+![YOWO框架圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image5.jpeg)
+
+由於2D CNN和3D CNN學習到的特徵不同，因此不能簡單相加，而是需要設計一個特徵融合模塊。
+
+## 輸入特徵
+兩個來源：A	單幀（YOLO）B	多幀（3D CNN）
+
+> [!INFO]
+> Concat 和 Add 的規則：Add	同一信息源（殘差連接）,Concat不同信息源（信息融合）
+
+## 🧩🧩🧩
+
+![YOWO框架圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image6.png)
+
+**A 首先對於輸入的特徵C×H‘×W‘做flatten操作 獲得向量C×N（這裏N=HW）**
+- 因為原始的輸入B ∈ C × H × W，每一個channel都是一個特徵圖，flatten拉平之後
+- F ∈ C × N  （N = H×W）每一行是一個channel，每一列表示的是一個空間位置，把圖像變成向量方便做矩陣運算。
+
+**B-C**
+和transformer類似，計算attention需要的QKV(但不是)。注意這裏沒有線性映射，Reshap和Transpose的作用在於：看不同的channel之間有多相似，實際上是計算Channel 關係矩陣：
+
+$$
+G_{ij}=\sum_{k}F_{ik}F_{jk}
+$$
+
+- 這裏YOWO只計算channel之間的相關性，所以可以理解為每一個C既是query （我要找什麼），也是key（我有什麼），也是value（信息本身）
+
+接着，計算QK乘積H=QKT，做Softmax操作之前為了避免數值溢出，我們減去H中的最大值然後做Softmax，Softmax計算出不同channel之間的相關權重,最終獲得attention矩陣。
+```
+H = Softmax（H-max（H））
+```
+$$
+F' = MF
+$$
+
+ 這個公式表示
+```
+Channel Attention × Feature 
+```
+得到增強後的Feature。（類似Attention x V，但是論文中用F表示）
+最後得到注意力輸出
+```
+F''= C × N
+```
+- H 是 channel之間的相似度矩陣 因為矩陣乘法的要求
+- (C × N) · (N × C) = C × C，那麼H用來計算的就是哪個channel和哪個channel之間的關係更強
+- **M=Softmax（H）softmax的作用:** 在於把相似度轉化為概率權重，因為H可能是任意數，我們需要讓權重和等於1才能表示注意力分配，如圖中M=C×C，表示某一個channel關注其他channel的程度
+- **Softmax(H - max(H)) 的解釋**：如果H = [1000, 1001, 1002]，那麼exp（1002）→爆炸，我們把它H - max(H)變成[-2, -1, 0]，softmax不變但是數值會更穩定。
+- 我們再把 F‘’ reshape 回來變回 feature map，得到F’‘=C×H×W  。
+最終的輸出還有一個帶權重的殘差連接操作：
+```
+F = F + αF''
+```
+  -  α權重因子會決定由多少的注意力信息被保留下來，這是一個可以學習的參數。
+
+- 經過以上操作後最終輸出的F已經與之前兩個特徵拼接的F不同，是一個經過了注意力機制處理後的，更好融合兩種特徵的F。這個輸出的F後還會再接一層3 x 3卷積（+BN+leakyRelu）和一層1 x 1卷積（不接BN和leakyrelu，只是線性映射）這兩個部分合在一起就是CFAM模塊。
+# 邊界框迴歸
+- 遵循YOLO對邊界框迴歸得相同方式，一個帶有1*1卷積核得卷積層用來生成所需數量得輸出通道，對於H‘xW’上的每個單元，通過在響應數據集上使用k-means技術選擇5個先驗錨點，每個錨點具有NumCls 類條件動作分數4個座標和置信度分數，從而使得YOWO的最終輸出尺寸為
+```
+ YOWO [(5 ×(NumCls+5))×H'×W']
+```
+ 
+- NumCls 類別數量也就是動作類別數，取決於數據集。第一個<u> 5 </u>代表有5個anchors，第二個<u> 5 </u>代表 bbox 的座標加上confidence。
+# 熱力圖解釋關注點
+ 🧩🧩🧩
+
+![YOWO框架圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image10.jpeg)
+
+- 圖中（a）部分表示3D CNN關注運動區域而不是所有的人，當前熱力圖關注具體的動作，而不是站着的人。關注的是動作運動變化而不是完整得人體。
+- （b）	部分表示2DCNN關注的是關鍵幀中所有的人，不關注誰在動而是主要關注誰長得像一個人。
+
+**論文利用這一可視化結果説明，2D CNN負責學習空間定位信息（Appearance Information），3D CNN負責學習時序運動信息（Motion Information），兩者具有明顯的互補性，因此需要通過CFAM模塊進行融合，從而同時獲得精確定位能力和動作識別能力。**

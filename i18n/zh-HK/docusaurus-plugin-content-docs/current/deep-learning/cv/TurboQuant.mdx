@@ -1,0 +1,106 @@
+---
+title: TurboQuant
+sidebar_position: 1
+---
+
+ 🧩🧩🧩
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image1.png)
+
+## 	為什麼需要TurboQuant
+谷歌在2026年3月發佈的TurboQuant是一個壓縮算法（Lossy），可以在不損失模型精度的前提下將大模型運行時的關鍵內存佔用（KV Cache）壓縮到3-bit，內存佔用降低6倍 同時將推理速度提升最高8倍，這意味着AI推理成本可以獲得斷崖式的下降。
+ 🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image2.png)
+
+**zip壓縮的程度主要取決於file的內容。**
+### 	KV Cache
+KV Cache 可以理解為Transformer在推理時記住過去信息的緩存
+以transformer大模型為例，模型是一步一步生成文本的：
+ 🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image3.png)
+
+那麼每生成一個新的token，都要重新計算Attention（Q，K，V）。為了避免重複計算，這些歷史Token的K和V會被緩存下來，即KV Cache。但是當上下文窗口擴展到百萬級時，KV緩存就會迅速膨脹，消耗的顯存甚至會遠超模型權重本身，導致 GPU 顯存迅速耗盡（OOM），極大限制了併發請求數，成為AI推理最大的內存瓶頸。
+### 	內存佔用舉例
+ 🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image4.png)
+
+這就是長上下文推理一直大模型商業化的最大成本瓶頸。1M Token的上下文僅KV Cache就需要1TB的顯存，成本極高。
+## 二、	TurboQuant核心思想
+- **傳統壓縮的隱藏代價：** 最初是的壓縮方法是將數據直接分成幾檔，每個數據值記錄對應檔位的編號，這樣就直接節省了挨個記錄數據的空間，但是關於檔位具體是什麼，我們又要額外寫一段説明，這一段‘説明’就是傳統壓縮中的額外開銷，它的長度是固定的，不管你正文壓得多短，它都佔那麼大。這就是傳統壓縮的尷尬：壓得越狠，你存的"説明"比"內容"還多，大量空間浪費在説明上。
+- TurboQuant 的核心突破：顯著降低了額外的存儲開銷 。
+- TurboQuant 本質上是一種面向 KV Cache 的超低比特在線量化方法。與傳統通過剪枝、Token選擇或Attention丟棄來減少計算的方法不同，TurboQuant 保留完整的 Attention 結構，但通過極低比特量化來壓縮 KV 向量存儲，從而顯著降低推理階段的顯存佔用。
+**它將KV向量的壓縮分為了兩個獨立的階段：**
+```
+- 主量化階段：使用PolarQuant（隨機旋轉變成高斯分佈+3/4bit量化）
+ - QJL誤差修正階段：由於超低比特量化仍然會帶來 Attention 內積誤差，
+  因此 TurboQuant 進一步使用基於 JL 投影的 sign sketch（符號編碼）來對量化誤差進行無偏估計。
+  QJL 並不直接恢復原始向量，而是以極低額外開銷近似恢復 Attention 內積，從而保持推理精度。
+```
+### 	隨機旋轉
+- **傳統量化（如INT8）** 將浮點數映射到低比特整數時，誤差集中在數值分佈的"尾部"——如果某個維度的數值異常大，量化精度會急劇下降。
+> - 理解：想象你面前有一杯鮮榨橙汁——果肉沉底了，上面是清汁，中間有些渾濁。如果你直接舀一勺來品嚐，味道取決於你舀到了哪一層——每層都不一樣，很不均勻。但如果你先用力搖一搖，果汁就變均勻了。這時候無論你從哪裏舀，味道都差不多。
+
+- 後續PolarQuant的解決思路是在量化前對向量進行隨機正交旋轉。
+-  **數學原理**：正交旋轉不改變向量的L2範數（歐氏距離），因此不影響注意力分數的相對大小。旋轉後各維度方差趨於均勻，消除了異常大數值導致的量化誤差集中。對x，y分別做旋轉zx=Qx 、zy=Qy使用同樣的Q誤讓x和y的模長不變，旋轉後內積也與原xy一致，向量之間的相似度沒變只是換了座標系。
+- **效果：** 在3bit精度下實現接近零的精度損失。
+
+	KV Cache的減少方法（隨機旋轉高斯分佈）
+原始的KV向量有的維度數值極大，有的極小，分佈無規律，那麼為了裝下那個極大的數值，量化的格子也被拉的非常大，而小數值也被擠在同一個格子中分不清了，會導致信息嚴重丟失。
+> [!INFO]
+> https://www.youtube.com/watch?v=7V0Vt2QzMDk
+ 
+🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image5.png)
+
+- 假設輸入是xy而碼本為c1和c2 那我們無論如何都要找到xy對應哪一個c更近（注意以下只是一個三維向量的例子）
+- 假設“caleb”這個詞由【8.0，0.1，-0.1】來表示可以看到這個數的波動很大，所以我們可以先找到這個詞的norm 得到8.001 這個值表示的是向量的大小，然後分別除以8.001又進一步得到了單位向量【1.0，0.0012，-0.012】雖然變成了單位向量但是第一個數1.0相比於其他兩個依然很尖鋭，只是規模變小了。所以我們本質上想要做的就是將1.0這個數據中包含的濃度比較高的能量分散的更均勻。方法就是將這個向量乘以一個3*3的隨機矩陣並進行旋轉，使得原向量的能量均勻分佈最終結果看起來像【0.58，0.69，0.42】。
+ 🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image6.png)
+
+- 這步操作看起來像是把本來我們know的能量轉換成了unknown，而這個過程本身卻將我們從未知帶入了已知，它的原理與極限定理的運作方式有關。
+- **極限定理的運作方式：** 在適當的條件之下，樣本均值的標準化版本的分佈會收斂到高斯分佈，而根據維度的大小我們可以得到不同形狀的分佈，在我們的例子中，由於有三維單位向量形式，我們就可以獲得一個μ為1/✓3，方差為1/3的高斯分佈。而我們將包含大量隨機峯值的輸入擬合到高斯分佈中，在這個範圍內構建我們的碼本對應就會容易的多。而由於我們實際的維度會更大，高斯分佈也會更加集中。
+🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image7.png)
+
+把向量變成高斯分佈是為了讓數據排布的更有規律，就可以用更少的bit進行存儲，從而減少KV Cache。 數據現在 100% 變成了標準的高斯分佈，我們不需要看具體的數據，就已經提前知道了這堆數據的統計學規律，從而算出一組更貼合數據要求的量化格子（Max-Lioyd量化器）。
+### 	PolarQuant-極座標變換量化（關鍵步驟1負責主要壓縮）
+- 在傳統的笛卡爾座標系中，一個二維向量需要用 (x, y) 兩個分量表示，這意味着需要分別存儲兩個獨立的數值信息。而在極座標系中，同一個向量可以表示為：一個距離 r（向量長度） 和一個角度 θ（方向信息） 
+這種表示方式的關鍵優勢在於：
+```
+ 把信息集中在r的部分。
+本質是：信息分佈不均勻（information anisotropy）
+在向量中：能量主要集中在“長度”，方向只是微調 
+```
+- 因此，TurboQuant採用先對數據做一次隨機旋轉，然後把座標轉換到極座標系，最後量化角度而非長度：
+```
+對 r（長度）進行高精度保留 
+對 θ（角度）進行更強的壓縮 
+```
+- 數學原理：真正的壓縮發生在θ角度量化上。旋轉後的8維笛卡爾分量會兩兩分組轉極座標
+ 🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image8.png)
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image9.png)
+
+把r（主信息）和θ（次信息）拆開，為後續壓縮創造條件。所有的θ分佈都是固定均勻分佈 不需要任何scale、均值、校準參數，直接用通用碼本（1bit）。
+ 🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image10.png)
+- TurboQuant可以被理解為Transformer 推理階段的 KV Cache 壓縮模塊，而由於 Transformer 的 Attention 計算依賴於 Query 與 Key 在原始 embedding space 中的內積關係，因此壓縮後的 KV 向量需要被解碼為近似原始向量，以便參與 Attention 計算。
+解量化得到的壓縮後近似向量x1，y1把索引轉回中心點，回覆極座標，再轉會笛卡爾，最後逆旋轉回原空間，計算主內積，但是這樣算到的主內積是不夠精確的，解決方法就是計算殘差交給後續QJL處理，用極低的成本恢復誤差。
+### 	QJL糾錯層（關鍵步驟2處理前面階段留下的殘差）
+與attention score有很大關係，由於步驟一生成的代碼本本身會引入一些偏差，因此在第二步中，他們後退一步，減少一位量化，找到均方誤差中的殘差誤差，然後對其應用QJL算法保證點積的完整。
+🧩🧩🧩
+
+![TurboQuant結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TurboQuantimg/image11.png)
+
+### 	實驗結果： 
+從LongBench基準測試結果可以看出，TurboQuant在KV Cache壓縮任務中表現出極強的魯棒性。在KV bit數僅為3.5的情況下，其性能（50.06）幾乎與Full Cache（16-bit）完全一致，實現了接近“無損壓縮”。
+相比之下，其他方法如KIVI需要更高bit數（5-bit）才能達到類似性能，而僅使用PolarQuant（無誤差校正）的方案則出現明顯性能下降。這表明QJL誤差修正模塊在TurboQuant中起到了關鍵作用。
+

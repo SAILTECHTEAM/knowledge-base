@@ -1,0 +1,299 @@
+---
+title: YOWO
+sidebar_position: 1
+---
+
+# YOWO
+
+
+
+**Paper title:**
+
+You Only Watch Once (YOWO): A One-Stage Network for Real-Time Spatio-Temporal Action Detection
+🧩🧩🧩
+![YOWO framework diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image1.jpeg)
+
+
+**Paper link:** https://arxiv.org/pdf/1911.06644.pdf
+
+
+#  Problem Background ❔
+🧩🧩🧩
+![YOWO framework diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image2.jpeg)
+
+
+From the name **YOWO (You Only Watch Once)**, we can see that it has a certain relationship with YOLO (You Only Look Once).
+
+ **Core idea:**
+YOLO: one-stage object detection
+YOWO: one-stage spatiotemporal action detection
+
+---
+## What Is Spatio-Temporal Action Detection (STAD)?
+
+
+
+ **Traditional video classification** (Video Classification) takes a whole video as input and outputs the action category corresponding to the video, such as running, swimming, or hitting someone.
+
+Input:
+
+```text
+Entire video
+```
+
+Output:
+
+```text
+running, swimming, hitting someone
+```
+
+It can only answer:
+
+```text
+What action happened in the video?
+```
+
+But it cannot answer:
+
+```text
+Who is performing the action?
+Where does the action happen?
+```
+
+Therefore, for behavior analysis in multi-person scenes, relying only on video classification can no longer meet practical needs.
+
+
+
+- **Introducing a new task: Action Detection**
+
+To obtain both the action category and the action location, researchers proposed the Action Detection task.
+
+Its essence can be represented as:
+
+```text
+Action Detection = Localization + Classification
+```
+That is, it simultaneously completes:
+
+```text
+Where + What
+```
+
+It answers at the same time:
+
+```text
+Which person is currently doing what action?
+```
+
+
+
+---
+
+## Why Previous Methods Were Not Ideal
+
+Before YOWO was proposed, most spatiotemporal action detection methods used a Two-Stage structure, whose overall pipeline was similar to Faster R-CNN. That is, proposals (candidate regions) are generated first, and then classification and regression are performed. This type of method is strongly influenced by detectors such as Faster R-CNN.
+
+The basic pipeline is as follows:
+
+```text
+Proposal Generation
+↓
+Classification
+↓
+Regression
+```
+
+Although it can obtain relatively good detection accuracy, it has the following problems.
+
+### Problem 1: The pipeline is complex
+
+It requires multiple steps, making the whole training and inference pipeline relatively cumbersome.
+
+```text
+Generate candidate boxes -> filter candidate boxes -> action classification -> bounding box regression
+```
+
+### Problem 2: The number of parameters is large
+
+Spatiotemporal action detection itself already needs to model both:
+
+```text
+Spatial information + temporal information
+```
+
+The Two-Stage structure further introduces an additional detection module, causing the number of model parameters and the amount of computation to increase further.
+
+### Problem 3: Inference speed is slow
+
+Video tasks need to process:
+
+```text
+T × H × W
+```
+
+That is, a large amount of data in both the temporal and spatial dimensions. Therefore, Two-Stage methods often have difficulty satisfying real-time detection.
+
+- **Against this background, YOWO borrows YOLO's One-Stage idea and proposes an end-to-end spatiotemporal action detection framework. While maintaining detection accuracy, it significantly improves inference speed and provides a new solution for real-time behavior detection.**
+
+#  Core Idea
+
+## Goal
+
+
+Complete both:
+
+```text
+Spatial localization (Object Detection) + behavior classification (Action Classification)
+```
+
+---
+
+## Key Difficulty
+
+*Behavior is not equal to single-frame information*🧩🧩🧩
+
+![YOWO framework diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image3.jpeg)
+
+
+```text
+Behavior = spatial information (Appearance) + temporal information (Motion)
+```
+
+- If there is no temporal sequence and we only look at one frame, it may easily fall into the difficulty of action recognition. We must rely on the continuous actions in nearby frames to judge the category of this segment.
+- Compared with spatial information, temporal modeling is more challenging. How to efficiently construct temporal associations across consecutive frames is very important. For video understanding tasks, many works use 3D CNNs as the basis for building action detection networks. The role of 3D CNN is to take a video clip as input, extract spatiotemporal features, and then pass them to the subsequent detection head. These works can be divided into two categories: two-stage methods or end-to-end detection. But no matter which type, they face an important problem: the number of parameters is large and the computation speed is extremely slow.
+
+
+Actions actually come from:
+
+```text
+Continuous motion process
+```
+
+not from a static image in a single frame.
+
+---
+
+
+# Overall Architecture
+To solve the above problems, YOWO is built on an existing 3D CNN (used to implement temporal modeling ability), while reducing the input size. It then chooses a relatively simple spatial modeling method (the paper mentions directly using the structurally simple YOLOv2), and finally designs a CFAM module based on a self-attention mechanism to fuse the two types of features. A bounding-box regression part is added at the end. The network architecture is shown below.
+🧩🧩🧩
+
+![YOWO framework diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image4.jpeg)
+
+
+- Lower branch YOLOv2 (or other YOLO-like models): performs spatial localization based on a single frame.
+
+- Upper branch (3D CNN): temporal modeling (Temporal Modeling) + behavior classification (Action Classification).
+
+
+
+# Spatial Modeling Method (2D CNN)
+**Key Frame mechanism. The paper says that the Keyframe is the last frame of the input clip. This is a causal structure, so no extra data loader is needed. A 2D backbone is used (Darknet-19 is also the backbone of YOLOv2). Given a key frame, it extracts spatial features whose dimensions become [C'', H', W']; H' and W' are the same as the dimensions of the 3D-CNN. In practice, this directly transfers a simple model from the object detection field.**
+- Core idea: each time, only one key frame is predicted. It uses a long-term feature bank and extracts non-overlapping 8-frame clip features from the whole video using a trained 3D-CNN.
+- Sliding Window
+  ```text
+  Training method: every frame can serve as the key frame
+  First time:
+  [t-7 ~ t]
+  detect t
+  Next time:
+  [t-6 ~ t+1]
+  detect t+1
+  ...
+  But each window still detects the last frame, not the middle frame.
+
+  ```
+
+# Temporal Modeling Method (3D CNN)
+
+- Ordinary CNN: only models spatial information (H x W).
+
+
+- 3D CNN:
+
+```text
+ Processing: spatial + temporal (T × H × W), adding the extra dimension T. The output feature dimensions are compressed to the same spatial size as the 2D branch.
+```
+- The basic architecture of the 3D-CNN in the paper's framework is 3D-ResNext-101. The dataset used is Kinetics, mentioned in the I3D paper. Given a video clip, the 3D backbone outputs a feature map containing a large amount of spatiotemporal features. The input of the 3D network is a video clip, which consists of a series of consecutive frames arranged in temporal order, with shape [C × D × H × W]. The feature map output by the last convolutional layer of 3D ResNext-101 also has shape [C × D × H × W], where C=3, D is the number of input frames, H and W are the height and width of the input image, C is the number of output channels, D=1, H=H/32, and W=W/32. The depth dimension (D) of the output feature map is compressed to 1, compressing the output volume to [C × H × W] so it matches the output feature map of the 2D-CNN.
+
+ * However, compared with TSM, it has larger computation and is heavier.*
+
+
+# Attention Module (CFAM module, corresponding to the whole Figure 3)
+
+YOWO adopts a channel fusion + attention mechanism scheme. It first obtains the 3D features and 2D features and concatenates them, then processes them with 1*1 convolution and 3*3 convolution, outputting the fused feature F. However, simple fusion is insufficient, so YOWO adds a CFAM sub-attention module.
+🧩🧩🧩
+
+![YOWO framework diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image5.jpeg)
+
+Because the features learned by 2D CNN and 3D CNN are different, they cannot simply be added together. Instead, a feature fusion module needs to be designed.
+
+## Input Features
+Two sources: A single frame (YOLO) and B multiple frames (3D CNN).
+
+> [!INFO]
+> Rule for Concat and Add: Add is for the same information source (residual connection), while Concat is for different information sources (information fusion).
+
+## 🧩🧩🧩
+
+![YOWO framework diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image6.png)
+
+**A first flattens the input feature C×H'×W' to obtain a vector C×N (where N=HW).**
+- Because the original input B ∈ C × H × W, each channel is a feature map. After flattening:
+- F ∈ C × N (N = H×W). Each row is a channel, and each column represents a spatial position. The image is turned into vectors to make matrix operations convenient.
+
+**B-C**
+Similar to transformer, QKV needed for attention is calculated (but not exactly). Note that there is no linear mapping here. The role of Reshape and Transpose is to see how similar different channels are. In practice, it calculates the Channel relationship matrix:
+
+$$
+G_{ij}=\sum_{k}F_{ik}F_{jk}
+$$
+
+- Here YOWO only calculates correlations between channels, so each C can be understood as the query (what I want to find), the key (what I have), and the value (the information itself).
+
+Next, compute the QK product H=QKT. Before Softmax, to avoid numerical overflow, subtract the maximum value in H and then apply Softmax. Softmax calculates the correlation weights between different channels, finally obtaining the attention matrix.
+```
+H = Softmax(H - max(H))
+```
+$$
+F' = MF
+$$
+
+ This formula means:
+```
+Channel Attention × Feature 
+```
+to obtain the enhanced Feature. (Similar to Attention x V, but the paper uses F.)
+Finally, the attention output is obtained:
+```
+F''= C × N
+```
+- H is the similarity matrix between channels. Because of the requirements of matrix multiplication:
+- (C × N) · (N × C) = C × C, so H is used to calculate which channel has a stronger relationship with which other channel.
+- **The role of M=Softmax(H) softmax:** it converts similarity into probability weights. Because H may be arbitrary values, we need the weights to sum to 1 to represent attention allocation. As shown in the figure, M=C×C, representing how much a certain channel attends to other channels.
+- **Explanation of Softmax(H - max(H)):** if H = [1000, 1001, 1002], then exp(1002) explodes. We convert H - max(H) into [-2, -1, 0]. Softmax remains unchanged, but the values become more stable.
+- We then reshape F'' back into a feature map, obtaining F''=C×H×W.
+The final output also has a weighted residual connection operation:
+```
+F = F + αF''
+```
+  - The α weight factor determines how much attention information is retained. It is a learnable parameter.
+
+- After the above operations, the final output F is already different from the previously concatenated F of the two features. It is an F that has been processed by the attention mechanism and better fuses the two types of features. This output F is then followed by a 3 x 3 convolution (+BN+leakyRelu) and a 1 x 1 convolution (without BN and leakyrelu, only linear mapping). These two parts together form the CFAM module.
+# Bounding Box Regression
+- It follows the same method as YOLO for bounding box regression. A convolution layer with a 1*1 convolution kernel is used to generate the required number of output channels. For each cell on H'×W', 5 prior anchors are selected using k-means on the corresponding dataset. Each anchor has NumCls class-conditional action scores, 4 coordinates, and a confidence score, making the final output size of YOWO:
+```
+ YOWO [(5 ×(NumCls+5))×H'×W']
+```
+ 
+- NumCls is the number of classes, meaning the number of action categories, and depends on the dataset. The first <u> 5 </u> represents 5 anchors, and the second <u> 5 </u> represents bbox coordinates plus confidence.
+#  Heatmap Interpretation of Attention Points
+ 🧩🧩🧩
+
+![YOWO framework diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/YOWOimg/image10.jpeg)
+
+- Part (a) of the figure shows that the 3D CNN focuses on moving regions rather than all people. The current heatmap focuses on the specific action, not on people who are standing. It focuses on motion changes of the action rather than the complete human body.
+- Part (b) shows that the 2D CNN focuses on all people in the key frame. It does not care who is moving, but mainly focuses on who looks like a person.
+
+**The paper uses this visualization result to show that the 2D CNN is responsible for learning spatial localization information (Appearance Information), while the 3D CNN is responsible for learning temporal motion information (Motion Information). The two are clearly complementary, so the CFAM module is needed to fuse them, thereby obtaining both accurate localization ability and action recognition ability.**
+

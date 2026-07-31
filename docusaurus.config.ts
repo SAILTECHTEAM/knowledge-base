@@ -27,7 +27,7 @@ const config: Config = {
   url: 'https://sailtechteam.github.io',
   baseUrl: '/knowledge-base/',
 
-  organizationName: 'SAILTECHTEAM',
+  organizationName: 'Linshu-Song',
   projectName: 'knowledge-base',
 
   onBrokenLinks: 'warn',

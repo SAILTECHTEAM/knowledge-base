@@ -1,0 +1,134 @@
+---
+title: WOO
+sidebar_position: 1
+---
+
+🧩🧩🧩
+
+![WOO diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image1.png)
+
+##  Core Idea of WOO
+Use one unified network to watch the video once and complete object detection and action recognition. No post-processing is needed. The model can directly output the action bounding boxes and action categories for a given video clip.
+##  Problem Background
+###  Abstract
+> *We propose an end-to-end pipeline named Watch Once Only (WOO) for video action detection. Current methods either split video action detection into independent stages for actor localization and action classification, or train two independent models within one stage. In contrast, our method solves actor localization and action classification simultaneously in a unified network. By unifying the backbone network and removing many manually designed components, the whole pipeline is significantly simplified. WOO uses a unified video backbone to extract features for actor localization and action classification at the same time. In addition, we introduce spatiotemporal action embeddings into the framework and design a spatiotemporal fusion module to obtain richer and more discriminative features, further improving action classification performance. Extensive experiments on the AVA and JHMDB datasets show that WOO achieves state-of-the-art performance while reducing GFLOPs by up to 16.7% compared with existing methods. We hope our work can inspire a rethinking of conventional methods for action detection and serve as a solid benchmark for end-to-end action detection.*
+
+- **FLOPs** indicates how many floating-point operations are required for one forward inference of the model.
+- **GFLOPs** indicates 10 to the 9th power floating-point operations. The higher it is, the heavier the model is, the slower inference becomes, and the higher GPU memory usage is.
+###  Video detection essentially includes two subtasks: where the person is, and what the person is doing
+Core conflict: a single frame is good for detection, while multiple frames are good for action recognition.
+###  Traditional methods (mainly compared with WOO in the paper): 🧩🧩🧩
+![WOO diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image2.png)
+
+YOWO belongs to a one-stage + two-backbone approach, and it still needs to complete 2D CNN detection and 3D CNN action processing. This WOO paper can be compared with YOWO. WOO believes that:
+- The YOWO architecture (a) is actually a two-stage architecture, jointly training the detection and classification models in a single training stage. Although the pipeline is simplified to some extent, it still needs to independently extract features from the original images.
+- The goal of the WOO paper is to use only one backbone to complete a true end-to-end architecture (b). Existing complex and independent pipelines hinder the scalability and practicality of video action methods in the real world.
+ 
+### The innovation of WOO is that it uses only one backbone and completes all tasks with one forward pass.
+---
+##  WOO Structure
+
+> [!INFO]
+> WOO consists of three key components: a unified backbone network, spatiotemporal action embeddings, and a spatiotemporal knowledge fusion mechanism.
+
+###  **Unified backbone network**
+A single backbone processes temporal and spatial information at the same time. The key design is to extract the Key Frame for detection while preserving temporal features for action recognition. 🧩🧩🧩
+
+![WOO diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image3.png)
+
+- Figure a represents the traditional Separate Backbone. The 3D video backbone on the right extracts features hierarchically through Res3 and Res4 (the 4th stage of ResNet. After each Stage, the feature map size becomes smaller, the receptive field becomes larger, and semantic information becomes stronger).
+- The list item DC5 here means that the last stage uses dilated convolution (atrous convolution, meaning holes are inserted into the convolution kernel. The number of parameters does not change, but the receptive field can become larger. This is not the mainstream approach). Its purpose is to maintain higher spatial resolution, because common methods for increasing the receptive field usually use pooling stride=2, but that makes the feature map smaller and reduces resolution.
+> Traditional action recognition often uses DC5 because many targets are small, and dilated convolution preserves more details. <u>But note that WOO does not use DC5,</u> because in addition to classification, WOO also needs to complete detection. The authors found that as the network deepens, the key frame continuously mixes with nearby frames, which causes clean spatial information to be contaminated by temporal information.
+```
+Frame5 = Frame4 + Frame5 + Frame6 
+```
+
+ - Figure b represents WOO's Unified Backbone. It keeps one unified video backbone and extracts the key frame from it as key-frame features, replacing the localization function of a 2D detection task.
+- **The problem caused by differences between two backbones:**
+Traditional methods consider detection and classification to be very different tasks, so they split them into two groups. The first group is specialized for looking at a single image frame, performing the detection task, and outputting detected bounding boxes, which is the 2D Person Detection Backbone on the left. The second group takes multi-frame video and outputs the overall action classification. In essence, this can be understood as looking at the same Key Frame twice.
+WOO believes that the same backbone can perform both tasks. Detection only needs one frame to know where the person is, while action recognition needs multiple consecutive frames to observe continuous motion. Therefore, inside WOO, the same backbone generates features Res3, Res4, and Res5. The Key Frame is extracted and sent to the detection head, while the complete video features continue upward to the action classification head. Some Stage is responsible for action classification, FPN is responsible for object detection, and the input of FPN comes from multi-level feature fusion such as Res3, Res4, and Res5.
+The final job of FPN is to fuse Res3, Res4, and Res5.
+- **WOO's solution:**
+Formally define
+> $X \in \mathbb{R}^{C \times T \times H \times W}$
+
+to represent the input spatiotemporal feature map of a specific layer, where C is the number of channels and T is time. The key frame is placed in the middle of the video clip.
+Use
+> $X_t = X[T/2] \in \mathbb{R}^{C \times H \times W}$
+
+to represent the key-frame feature map.
+The network separates the key frame feature early. It designs a simple module so that the single backbone network can provide task-specific feature maps for the actor localization head and action classification head. The module is lightweight because it separates key-frame features from all-frame features in the early stage. The motivation is that as the model deepens, the interaction between key-frame features and other frames increases.
+Then a lightweight FPN module is introduced on the extracted key frame to output multi-scale spatial features for Actor localization detection, replacing the traditional extra 2D detection network.
+###  Spatiotemporal Action Embedding
+Behavior classification is more difficult than localization, so the authors suspect that using one backbone for both tasks will bias it toward localization, thereby affecting classification performance.
+> Original paper: "We found that the unified architecture performs well for localization, but action classification is still limited. Therefore, we suspect that when the same backbone serves both tasks, it will be biased toward the localization task, affecting action classification performance."
+
+Based on this observation, the authors believe that after using a unified backbone, classification features are not discriminative enough. Therefore, they propose an additional enhanced classification branch, spatial and temporal behavior embeddings, and an interaction mechanism between them, so that behavior classification features become more discriminative in both spatial and spatiotemporal dimensions.
+
+###  Spatiotemporal Fusion Module
+Located inside the action classification head, it integrates spatial and temporal knowledge. Through the spatiotemporal fusion module, spatial attributes such as shape and posture, as well as temporal attributes such as motion and the temporal scale of behavior, are combined through the Fusion module to generate features for classification.
+###  Actor Localization Head (a detection head used to find the person's spatial position)
+
+- This detection head borrows from Sparse R-CNN (a modern end-to-end method).
+- The input is the multi-scale features from key frame -> FPN, and the output is bounding boxes and confidence scores.
+- During training, set prediction loss is used to perform optimal bipartite matching between predictions and ground truth, and no post-processing is needed during evaluation.
+(For example, NMS. This inherits the idea of Sparse R-CNN: one GT corresponds to one Prediction. The optimal matching is completed during training, so during testing there will not be 10 boxes simultaneously enclosing one person.) At the same time, unlike dual-backbone methods, no extra pretraining is needed because detection and action classification share the same backbone network.
+- Set prediction simply predicts a fixed number of boxes and makes them directly equal to the final result.
+```
+GT (ground-truth boxes): 3 people 
+Model prediction: 5 boxes 
+Set prediction finds one "best-matching prediction box" for each GT
+Bipartite matching means prediction boxes and GT boxes are matched one-to-one, so multiple prediction boxes will not correspond to the same person.
+```
+###  Action Classification Head
+🧩🧩🧩
+![WOO diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image7.png)
+
+```
+For each person detected by the previous human detector -> use RoI Align (feature map cropper) to separately extract spatial information + temporal information ->
+use attention to let different people interact -> fuse -> classify
+```
+
+- The input Res5 feature (CTHW) is essentially the spatiotemporal feature of the video. This Res5 Feature is the feature map obtained from the last layer of the backbone after the whole 8-frame input video. The goal of RoI Feature is to crop the feature of this person from the whole Feature Map and unify it into S x S. The input detection box outputs ROI Feature (CTSS), focusing only on this person's region, and then it is split into two branches: spatial and temporal embeddings. This spatiotemporal feature representation ability makes it easier for the model to distinguish actions.
+- The blue temporal behavior feature performs pooling over spatial HW, preserving temporal changes and discarding spatial information.
+- The green spatial behavior feature performs pooling along temporal T, preserving spatial structure. Here SxS is the spatial output size of RoIAlign.
+- But directly concatenating Spatial and Temporal is too simple, so Embedding Interaction is introduced. This is used to obtain more discriminative features. Spatial and temporal embeddings are further introduced, and together with the previous spatial-temporal features and inverse convolution, they obtain rich instance features.
+> Original paper: "Note that the embedding is exclusive for each of the N features. Thus, we define Es ∈ RN×d,Et ∈ RN×d for spatial and temporal embedding."
+- Taking Spatial Embedding as an example, we already have the spatial feature of the current ROI. The authors also want the model to additionally remember that this is a spatial feature, so they add Spatial Embedding. The embedding at the bottom can be understood as the spatial vector of each person, used to represent spatial relationships between RoIs. The architecture of the Interaction module is also an attention structure similar to transformer attention, and then Q, K, and V are obtained through linear layers. The left side shows matrix multiplication obtaining correlations between different actors, producing Attention Scores. For example, A-B=0.9 and A-C=0.1 means A should pay more attention to B, because A and B are interacting.
+Then it goes through Scale $\frac{QK^{T}}{\sqrt{d}}$.
+If the dimension is large, the values will also be large, and the Softmax gradient will be poor. Therefore Scale is used to stabilize the values.
+Then Softmax is applied. *(Softmax after Scale obtains Attention Weight, indicating who is most worth attending to.)*
+The Attention weights are then multiplied by v to obtain the interacted embedding output, which is then applied to the spatial feature on the right to enhance each person's spatial feature.
+---
+ 🧩🧩🧩
+![WOO diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image9.png)
+
+To capture relationships between different people, the authors designed this Interaction module. We already have the temporal and spatial features of this person, but the authors believe:
+
+ **Using only the current person's feature is not enough, because there are often multiple people in a video. Seeing the actions of multiple people at the same time may make video classification easier to judge.** 
+###  Embedding
+To save computation, WOO does not use features for interaction. Instead, it directly uses lightweight embeddings for attention.
+> Original text: "The embedding is lighter compared to the feature map, we adopt the attention mechanism between embedding instead of feature maps for efficiency."
+
+The authors believe that what truly needs relationship modeling is not the details of the Feature, but the relationships between Actors. They perform Attention between Embeddings, obtain relationship information, and directly fuse it back into the Feature. There is no need to let Attention fully participate in the feature maps.
+> [!WARNING]
+> But as mentioned above, the paper does not explicitly draw how the embedding is generated. It only says:
+**"The embedding is exclusive for each of the N features."**
+
+- WOO does not completely abandon Feature. Instead, it avoids directly performing Attention interaction between high-dimensional Features. The authors introduce lightweight Spatial/Temporal Embeddings for each Actor, and only complete Actor relationship modeling in the Embedding space. After obtaining the interacted Embedding, they fuse the relationship information back into the original Feature through 1×1 convolution, thereby enhancing action classification ability. Therefore, the key to saving computation is not "filter first and then do Feature Attention", but that the whole Attention process always happens only in the lightweight Embedding layer, not the high-dimensional Feature layer.
+### P.S. Understanding Attention
+** Attention**
+Its essence is helping the model decide what to focus on. Higher weights indicate greater importance.
+** CNN Attention**
+Taking CBAM as an example, CBAM can only see a 256*8*8 Feature and does not know the specific person, so it focuses on which channel and which region are more important. It learns to pay attention to people and ignore the background. Therefore, CNN Attention focuses on the importance inside the Feature.
+** LLM Self-Attention**
+Self-Attention lets every element (Token) look at all other elements, thereby deciding who it should mainly reference.
+Unlike CBAM, it knows different people such as Actor A, Actor B... and calculates how much relationship exists between people. The Attention in WOO Figure 4 is closer to LLM Self Attention.
+**This paper uses LLM-style self-attention. The previous YOWO paper uses CNN attention.**
+🧩🧩🧩
+
+![WOO diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/WOOimg/image10.png)
+ 
+
+
+

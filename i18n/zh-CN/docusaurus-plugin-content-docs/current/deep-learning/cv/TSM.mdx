@@ -1,0 +1,106 @@
+---
+title: TSM
+sidebar_position: 1
+---
+
+ 🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image1.png)
+
+相比2D CNN只能对单帧进行空间特征提取，在视频理解任务中3D CNN能够同时建模空间和时间信息，因此可以提取更复杂的时空特征。 
+
+**3D卷积图**🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image2.png)
+
+**2D卷积图**🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image3.png)
+
+然而，3D卷积需要在时间维度上进行额外计算，导致计算量和参数量显著增加，难以应用于实时或资源受限的场景。
+因此，一个关键问题是：
+> 能否在保持2D CNN高效计算的基础上，引入时间建模能力？
+
+## 一、解决方法
+	
+### 1. TSM提出的是一种轻量的混合方式。
+如下图所示 可以看到特征的4个维度其中C为通道，T是时间维度。
+
+🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image4.png)
+
+- TSM的核心操作在于：将一部分通道沿着时间维度进行shift（包括前后移动）这样机器可以使用标准2D卷积进行batch并行处理，提高运算效率。
+ 
+### 2. Shift的作用：
+以图中b示意为例，橘色为t=0 那么在shift后的当前帧的特征就会来自t-1和t+1（文章中只shift 1），上图b和c分别表示offline与online方法进行shift。 
+- （b）Offline的shift操作双向的，当前时间点会看到未来的资讯。
+- （c）Online的Tsm模型由于得不到未来帧的通道信息，单向操作。我们只需要改变数据的地址，所以这种操作不需要任何flops或者参数的增加。
+
+### 3. 核心思想在于：
+**3D原本目的：** 变成2D减少计算量
+- 先shift 后卷积 所以c中t那一行卷积后获得的channel取一部分shift到t-1（offline还有t+1）。
+- 至于哪一个channel比较重要就让机器自己学，因为不知道时间性上哪一个channel更重要。
+🧩🧩🧩
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image5.png)
+- 现在可以在时间维度上用batch并行处理了，因为变成了2D convolution，我们把时间维度用shift来做拼接。之后的convolution融合。
+
+## 二、Temporal Shift Module方法
+ 🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image6.png)
+
+### 1.
+ - a图表示延迟开销，如图我们可以看到从原点上不做 TSM（2D CNN）到1所有 channel 都 shift（极端情况），shift 的 channel 越多，tsm会增加 latency overhead，所以论文采用了1/4的 shift。
+*（好像默认设置的 tsm 是 offline 的）*
+- b图为精度对比，绿线表示直接 shift，蓝线表示残差结构 shift，蓝线效果最好因为 residual 会保留原始的信息不破坏空间特征。图片也表明 shift 不是越多越好 反而有可能会导致 accuracy 下降。
+### 2. 模型设计：Residual TSM 与 In-Place TSM 
+🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image7.png)
+
+**(a)在shift之后才进行的残差连接**
+虽然 shift 的内容不会增加任何参数和 Flop，但是如果直接把 Shift 放 Residual Connection 之前（a），会导致当前帧的一部分特征被移动到了相邻帧，导致当前帧无法再访问这些已经被移走信息，这样就会削弱2D CNN原本擅长的对当前画面的理解能力，从而影响检测的精度。
+尤其是当位移大量通道的时候，当前帧中存储的被移动通道中的信息会丢失。因此虽然模型获得了时间信息，但对当前画面的理解能力会下降，从而影响最终的识别效果。
+**(b) Residual TSM 可以理解为**：
+在加入时间信息的同时，把原来的信息也完整保留下来。这样即使某些特征被移动到了前后帧，模型仍然能够通过残差连接看到当前帧的完整内容，因此不会像 In-Place TSM 那样因为信息被搬走而影响识别效果。
+
+ 
+### 3.	Offline TSM video models 
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image8.png)
+
+**Offline TSM** 和 **Online TSM** 的最大区别在于：
+因为离线推理时整个视频已经录制完成，所以模型能够提前看到未来的信息；而在线推理时未来帧还没有产生，因此不能使用未来信息。
+- 论文正是利用这一点，在 Offline TSM 中将部分通道向前移动、部分通道向后移动，从而实现双向时间信息交换。
+> 但是论文结果中似乎认为**不把还未发生**的时间帧移动进来效果更好。
+
+- 图中首先在左侧蓝色Video中进行视频采样得到Frames，然后接上的图中第一个2D Conv就是普通的 ResNet 卷积层用来提取空间特征（如人体轮廓，衣服的纹理…）而不是时间特征。经shift之后，当前Feature 中可能同时存在过去帧、当前和未来帧的信息，但由于shift 本身不学习任何东西，再用后面的2D卷积融合这些时间信息。
+### 4.基于base TSM（offline）后提出的扩展Online temporal shift
+
+Online temporal 无法得到视频的未来帧，所以是Uni-directional 的。
+  🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image9.png)
+
+上图中展示了用于Online中的单向TSM 重复该流程。首先对每一帧每一个残差块的前1/8个特征图保存并缓存道内存中。然后对于下一帧将当前特征图的前1/8替换为缓存的特征图，最后将7/8个当前特征图 和1/8个旧特征图组合起来生成下一层。使用单向TSM进行在线视频识别可以获得以下几个优势： 
+- 低延迟推理：对于每一帧，我们只需要替换并缓存 1/8 的特征，无需任何额外的计算。因此，每帧预测的延迟几乎与 2D CNN 基线模型相同。
+- 内存占用低：由于ResNet-50仅将一小部分特征缓存到内存中，因此内存占用很低。例如，ResNet-50仅添加0.9MB缓存来存储中间特征。
+- 多层次时间融合： TSM 支持所有层次的时间融合。
+
+Online tsm中我们只能访问当前帧和过去帧，因此，TSM采用了一种单向的时间信息传递方式，在处理当前F<sub>t</sub>时，模型会从上一帧中取出一部分特征（例如1/8的通道）并缓存到内存中，然后在下一帧 F<sub>t+1</sub>处理时，将这部分缓存的特征替换当前帧的一部分特征，从而实现跨时间的信息传递。整个过程不需要额外计算，只是进行数据的移动，因此几乎不会增加计算开销。同时，由于大部分特征仍来自当前帧（如7/8），模型仍然可以保持良好的空间建模能力。这种方式使得TSM能够在保持2D CNN计算复杂度的同时，实现类似3D CNN的时序建模能力，并且特别适用于低延迟的实时任务，例如自动驾驶或视频监控。
+PS.这里1/8的来源指的是前文中基于offline得到的shift1/4最好
+```
+Offline（双向）TSM：总共 shift = 1/4
+= 1/8 向前 + 1/8 向后
+
+Online（单向）TSM：只 shift = 1/8
+= 只用过去帧
+```
+🧩🧩🧩
+
+![TSM结构图](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image11.png)
+
+
+
+
