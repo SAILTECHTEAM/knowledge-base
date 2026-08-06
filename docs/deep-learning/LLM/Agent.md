@@ -1,358 +1,576 @@
 # Agent
-## Agent Overview
-### What is an Agent?
-The term **"Agent"** can have multiple definitions. Some people define an Agent as a fully autonomous system capable of operating independently over extended periods of time, using various tools to accomplish complex tasks. Others use the term to describe a more structured implementation that follows predefined workflows.
 
-**Components of an Agent**  
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig1.png)
+## Overall Agent Pipeline
 
-Source: https://www.bilibili.com/video/BV1uNk1YxEJQ?spm_id_from=333.788.videopod.episodes&vd_source=cdbd526603d180d53ccd6caa6a2ec439&p=8
+### What is an Agent
 
-From an engineering perspective, an Agent can be decomposed into four core modules: **Reasoning, Memory, Tools, and Action**.
+The term "Agent" can have multiple definitions. Some people define an Agent as a fully autonomous system that can operate independently over a long period of time and use various tools to complete complex tasks. Others use the term to describe a more structured implementation that follows predefined workflows.
 
-### Complete Agent Workflow
-We believe that a simple LLM (Prompt) alone should not be considered an Agent. The fundamental building block of an Agent system is an LLM enhanced with capabilities such as retrieval, tools, and memory. Modern models can proactively leverage these capabilities to generate their own search queries, select appropriate tools, and determine which information should be retained.
+**Components of an Agent**
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig1.png" width="70%">
+
+</div>
+
+Image source: https://www.bilibili.com/video/BV1uNk1YxEJQspm_id_from=333.788.videopod.episodes&vd_source=cdbd526603d180d53ccd6caa6a2ec439&p=8
+
+
+From an engineering perspective, an Agent can be divided into four core modules:
+
+- Reasoning
+- Memory
+- Tools
+- Actions
+
+### Complete Workflow of an Agent
+
+An Agent is a software system that can perceive the environment, perform reasoning and decision-making, call tools, and continuously complete tasks based on feedback. LLMs usually serve as the reasoning core of an Agent, but an Agent is not equivalent to an LLM.
+
+A simple LLM with only prompts cannot be considered an Agent. The fundamental building block of an Agent system is an LLM enhanced with additional capabilities such as retrieval, tools, and memory. Modern models can actively utilize these capabilities, generate their own search queries, select appropriate tools, and determine what information should be retained.
 
 🧩🧩🧩
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig2.png)
+<div align="center">
 
-The focus of an Agent is not the model itself, but enabling the model to truly accomplish tasks.
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig2.png" width="70%">
+
+</div>
+
+The focus of an Agent is not the model itself, but enabling the model to truly possess the ability to complete tasks.
 
 🧩🧩🧩🧩
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig3.png)
+<div align="center">
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig3.png" width="70%">
+</div>
 
-Agent Decision-Making Workflow
+Agent Decision-Making Process
 
-Source: https://www.bilibili.com/video/BV1uNk1YxEJQ?spm_id_from=333.788.videopod.episodes&vd_source=cdbd526603d180d53ccd6caa6a2ec439&p=8
+Image source: https://www.bilibili.com/video/BV1uNk1YxEJQspm_id_from=333.788.videopod.episodes&vd_source=cdbd526603d180d53ccd6caa6a2ec439&p=8
 
-**Perception:** The Agent first receives input from the external environment. It needs to understand what the user is asking before passing the information to the LLM.
 
-**Planning:** The LLM decomposes the task into smaller subtasks in order to solve the problem more effectively.
+**Perception:**  
+The Agent needs to receive input from the external environment and understand what the user is asking. After perception, the information is passed to the LLM.
 
-**Subtask decomposition principles:** Subtasks should be as independent as possible, with each task corresponding to a single Tool. This design facilitates engineering implementation, and each step should produce a clearly defined output. If the decomposition granularity is too coarse, reliability decreases; if it is too fine, reasoning cost and contextual complexity increase. Therefore, in engineering practice, each step is typically designed to correspond to a clear objective with a verifiable output.
+**Planning:**  
+The Agent uses the planning capability of the LLM to decompose the task and solve the problem more effectively.
 
-**Action:** Execute the current subtask and obtain feedback.
+Regarding the principles of subtask decomposition: subtasks should be as independent as possible. Each task should correspond to a specific Tool, which improves engineering implementation, and each step should have a clear output.
 
-**Observation:** The Agent does not initially know whether the feedback is good or bad, so it reflects on the result. If the outcome is satisfactory, it proceeds to plan the next task; otherwise, it reevaluates whether the next planning step should be revised.
+If the decomposition granularity is too coarse, the reliability of the Agent may decrease. If it is too fine, reasoning costs and context complexity will increase. Therefore, in engineering practice, each step should ideally correspond to a clear objective and a verifiable output.
 
-### The Role of LLMs in the Agent Framework
-Within the overall framework, the LLM serves as the brain responsible for reasoning and decision-making. However, it cannot directly interact with the external world or communicate directly with users. Without a Runtime, even if the model knows what to do, it lacks an execution environment—like a person placed in a void, unable to accomplish any real task.
+**Action:**  
+The Agent solves the current subtask and obtains feedback.
 
-**How an LLM Responds:**
+**Observation:**  
+However, the Agent does not initially know whether the feedback is good or bad, so it needs to perform reflection. If the result is good, it continues planning the next task. If the result is unsatisfactory, it considers whether the next planning step needs to be redesigned.
 
-Fundamentally, there is only one response pattern for an LLM:
+### The Role of LLM in the Agent Framework
+
+Within the entire framework, the LLM functions more like the brain responsible for reasoning and decision-making. However, it cannot directly interact with the external world or directly serve users by itself.
+
+Without a Runtime, even if the model knows what should be done, there is no execution environment available. It is like a person placed in an empty space, unable to actually complete any task.
+
+**How LLM Generates Responses:**
+
+The LLM itself is only responsible for generating outputs based on inputs. In an Agent framework, the Runtime constructs an execution loop. A common execution pattern is the ReAct (Reasoning-Acting) loop:
 
 > Reason  
-> Act (invoke tools if necessary)  
-> Observation  
-> Final Answer
+> Call a Tool if necessary (Act)  
+> Obtain results (Observation)  
+> Generate the final answer (Final Answer)
 
-The only difference is that:
+The difference is only that:
 
 Some questions do not require access to the external environment, for example:
 
 > Hi, how are you?
 
-In such cases, the LLM can answer directly using its existing knowledge.
+The LLM can directly generate an answer based on its existing knowledge.
 
-More often, however, the LLM realizes that it lacks necessary information or needs to perform certain operations, so it asks the Runtime to invoke the appropriate Tool. These tools are not limited to APIs—they may also include MCP, databases, RAG retrieval systems, search engines, local code executors, or even other Agents.
+More often, the LLM will recognize that it lacks necessary information or needs to perform certain operations, and therefore request the Runtime to call the corresponding Tool.
 
-Therefore, it is inaccurate to think of this as "two different answering methods." Instead, it should be understood as:
+Tools are not limited to APIs. They can also include MCP, databases, RAG retrieval systems, search engines, local code execution environments, or even other Agents.
 
-The model always completes the required task first and then generates the final answer. Some tasks simply do not require tool invocation.
+Therefore, we should not simply understand this as having "two different response modes". Instead, the correct understanding is:
 
-It is also important to note that LLMs generally struggle to explicitly admit:
+The final goal is always to complete the task first and then generate the answer. The only difference is that some tasks happen to not require Tool calls.
 
-```text
-This question cannot be solved.
-I couldn't find the answer.
-I'm not sure.
+It is important to note that large language models themselves usually have difficulty proactively admitting:
 ```
+This problem cannot be solved.
+I could not find the answer.
+I am not sure.
+```
+When a problem truly cannot be solved, without additional constraints, the model often does not automatically stop. Instead, it may continue searching, planning, or even start generating hallucinations (Hallucination), producing answers that appear reasonable but are actually incorrect.
 
-When a problem genuinely cannot be solved, unless explicit constraints are imposed, the model often does not stop automatically. Instead, it continues searching, planning, and may even begin hallucinating—producing answers that appear reasonable but are actually incorrect.
+Therefore, in practical engineering systems, the number of Agent loops, Tool Calls, or Planning steps is usually limited by the Runtime.
 
-Therefore, in practical engineering, the Runtime usually imposes upper limits on the number of Agent iterations, Tool Calls, or Planning steps.
-
-An LLM (Prompt) without a Runtime should not be regarded as an Agent. The Runtime is what fundamentally enables an Agent to function as an engineering system.
+An LLM with only prompts and without a Runtime cannot be considered an Agent. The core factor that gives an Agent engineering capabilities is the Runtime.
 
 ## Agent Runtime
-### What is Runtime?
-A Runtime is essentially the execution infrastructure of an AI Agent. It manages the Agent's lifecycle, state, computational resources, and interactions with external systems, ensuring that the Agent can operate reliably, securely, and at scale. It provides the infrastructure or platform that enables an Agent to run, process inputs, execute tasks, and deliver outputs in real time or near real time.
 
-> Responsibilities:
+### What is Runtime
+
+Runtime is essentially the execution infrastructure of an AI Agent. It manages the Agent's lifecycle, state, computing resources, and interactions with external systems, ensuring that the Agent can operate reliably, securely, and at scale.
+
+It is the infrastructure or platform that enables an Agent to run, process inputs, execute tasks, and deliver outputs in real time or near real time.
+
+> Responsible for:
 >
-> Maintain State and Session;  
-> Manage Memory;  
-> Invoke Tools;  
-> Control workflows;  
-> Handle permissions and exceptions;  
-> Organize Context;  
-> Interact with the external environment.
+> Maintaining State and Session;  
+> Managing Memory;  
+> Calling Tools;  
+> Controlling workflows;  
+> Handling permissions and exceptions;  
+> Deciding which information enters Context;  
+> Interacting with the external environment.
 
 🧩🧩🧩
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig4.png)
+<div align="center">
 
-Typical Runtime
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig4.png" width="70%">
 
-When the LLM determines that a tool is required, it passes the Tool Call request to the Runtime, which then invokes the corresponding MCP Server through the MCP Client.
+</div>
 
-However, one important component is missing from this process:
 
-> "Does the library have Harry Potter?"  
+**Typical Runtime**
+
+When the LLM determines that a Tool is required, it sends the Tool Call intention to the Runtime. The Runtime then uses the MCP Client to call the corresponding MCP Server.
+
+However, this pipeline misses one important component:
+
+> "I want to search whether the library has Harry Potter."  
 > "Where can I find this book?"  
-> Which specific book does "this book" refer to?
+> Which book does "this book" refer to?
 
-**State:** Hidden behind this process is a concept called **State**. State stores the information that an Agent must continuously maintain while executing tasks, such as whether the user has logged in, user permissions, conversation history, current task progress, previously invoked tools, tool outputs, and business-related data (e.g., whether a book has already been borrowed or whether there are outstanding fines). This information is not lost after a single model invocation but is maintained consistently by the Runtime.
+**State:**  
+There is a hidden component here called State.
 
-When the user submits a new request, the Runtime selects the information from the current State that is relevant to the current task and provides it to the LLM, helping the model understand the context and determine which Tool or API should be called next. For example, when a user says, "Help me renew this book," the LLM itself does not know which book "this book" refers to. Instead, the Runtime retrieves the borrowing records and conversation history stored in the State, provides the relevant information to the LLM, and enables the model to correctly invoke the corresponding renewal API.
+State is used to store information that the Agent needs to continuously maintain during task execution, such as whether the user is logged in, identity permissions, conversation history, current task progress, previously called tools, tool results, and business data (such as whether a book has already been borrowed or whether there are overdue payments).
 
-Regarding the *Runtime's selection* mentioned above: the Runtime itself does not perform autonomous reasoning. It organizes task-related State according to predefined rules or workflows established by the developer. It is the LLM—not the Runtime—that actually understands and interprets the information.
+This information is not lost after a single model call. Instead, it is maintained by the Runtime.
+
+When a user sends a new request, the Runtime uses the current State and provides task-relevant information to the LLM, helping the model understand the context and decide which Tool or API should be called next.
+
+For example, when a user says:
+
+"Help me renew this book."
+
+The LLM itself does not know which book "this book" refers to. The Runtime uses the borrowing records and current conversation information stored in State, provides the relevant information to the LLM, and allows the model to correctly call the corresponding renewal API.
+
+Regarding the above statement about *Runtime selection*:
+
+The Runtime itself does not think autonomously. The Runtime selects task-relevant information according to rules or workflows predefined by developers to organize the State.
+
+The component that truly understands this information is the LLM, not the Runtime.
 
 ### Context
-The LLM does not consider only the current user message in each interaction. Instead, it simultaneously receives the system prompt, tool list, conversation history, session/user state, permission status, retrieval results, and the current user input. The Runtime is responsible for organizing all of this information into a controlled execution flow.
 
-**Context** refers to the complete set of information received by the LLM each time it processes a task. It includes conversation history, user queries, current outputs, available tools, the system prompt, and other relevant information. It can be regarded as the LLM's temporary working memory.
+In each round, the LLM does not only look at the current sentence. It receives multiple types of information simultaneously, including the system prompt, tool list, conversation history, session/user state, permission status, retrieval results, and the current user input.
 
-The **context window** of a model represents the maximum number of tokens that the model can process during a single interaction.
+The Runtime is responsible for organizing these pieces of information into a controllable execution process.
 
-The size of the Context and the number of tokens it contains are both constrained by the context window.
+Context refers to the total information received by the LLM during each inference process.
+
+Context can include many types of information, such as conversation history, user queries, current outputs, tool lists, and system prompts.
+
+Context represents the information received by the model during the current inference step, while Memory is the mechanism used by the system to store information over a longer period.
+
+Context is a temporary input, while Memory provides the information used to construct Context.
+
+The context window size of mainstream models represents the maximum number of tokens that a model can process in a single interaction.
+
+The maximum size of Context and the number of tokens it can contain are determined by the context window.
 
 🧩🧩🧩
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig5.png)
+<div align="center">
 
-Note that the **Context Window is not the same as Memory**.
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig5.png" width="70%">
 
-## **Types of Memory in AI Agents**
+</div>
 
-**Memory:** Memory can be divided into **short-term memory** and **long-term memory**.
 
-**Memory Formation:** Large language models are pre-trained on massive datasets containing world knowledge. During pre-training, the model learns to understand and generate human language by adjusting the weights of its neural network. This process is regarded as the formation of "memory." Through techniques such as deep learning and gradient descent, the model continuously improves its ability to predict and generate text, thereby forming long-term memory. This knowledge is stored in the model's parameters and does not disappear unless the model is retrained or fine-tuned.
+Note that the Context Window is not equal to Memory.
 
-**Short-Term Memory / Working Memory**
 
-Short-term memory (STM) is the mechanism that enables an Agent to maintain the immediate context of the current conversation and task. It mainly includes:
+**Types of AI Agent Memory**
 
-- **Conversation (Context) Memory:** Maintains a rolling window of recent conversation history to ensure contextual consistency in responses.
-- **Working Memory:** Stores temporary information required for the current task, such as intermediate results and variable values.
+Memory can be divided into short-term memory and long-term memory.
+
+
+**Short-term Memory / Working Memory**
+
+Short-term Memory (STM) is the system used by an Agent to maintain the immediate context of the current conversation and task.
+
+It mainly includes:
+
+- Conversation buffer (Context) memory: Maintains recent conversation history through a rolling window to ensure contextual relevance of responses;
+- Working memory: Stores temporary information during the current task, such as intermediate results and variable values.
 
 Short-term memory is limited by the size of the context window and is suitable for simple conversations and single-task scenarios.
 
-**Long-Term Memory**
 
-Long-term memory (LTM) is the form of memory that enables an Agent to preserve knowledge across multiple conversations and tasks over an extended period. It corresponds to the persistent memory in the human brain, such as factual knowledge and past experiences. Long-term memory is typically implemented using external storage or knowledge bases, including but not limited to:
+**Long-term Memory**
 
-- **Summarized Memory:** Stores concise summaries extracted from long conversations.
-- **Structured Knowledge Base:** Stores structured information using databases or knowledge graphs.
-- **Vector-Based Storage:** Uses vector databases to enable semantic memory retrieval.
+Long-term Memory (LTM) is the form of memory used by an Agent to store knowledge across sessions and tasks over a long period of time.
 
-Long-term memory allows an Agent to accumulate knowledge and experience over time, making it particularly suitable for knowledge-intensive applications and long-term personalized interactions.
+It corresponds to persistent memories in the human brain, such as factual knowledge and past experiences.
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig6.png)
+The implementation of long-term memory usually relies on external storage or knowledge bases, including but not limited to:
+
+- Summary memory: Extracting key summaries from long conversations and storing them;
+- Structured knowledge databases: Using databases or knowledge graphs to store structured information;
+- Vectorized storage: Using vector databases to achieve semantic-based memory retrieval.
+
+Long-term memory enables Agents to accumulate experience and knowledge over time. It is especially suitable for knowledge-intensive applications and scenarios requiring long-term personalization.
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig6.png" width="70%">
+
+</div>
 
 ---
+### Session State and Memory in Conversation Memory
 
-### Session, State, and Memory in Conversation Memory
+Common approaches for managing contextual memory:
 
-Common approaches for managing conversational context include:
+Session: Represents the current conversation thread. It describes an ongoing interaction process between the user and the Agent system. It contains the chronological record of user messages and the operations performed by the Agent (called Events) during this specific interaction process.
 
-**Session:** Represents the current conversation thread, i.e., an ongoing interaction between the user and the Agent system. It contains a chronological record of user messages and the operations (called **Events**) performed by the Agent during that interaction. A Session can also store temporary data that is valid only for the current conversation (**SessionState**).
+A Session can also store temporary data that is only valid during the current conversation (SessionState).
 
-**State (session.state):** Represents the data associated with the current conversation. It is stored within a specific Session and is used to manage information relevant only to the active conversation, such as the shopping cart contents during the current chat or user preferences mentioned in this session.
+State (session.state): Represents the data in the current conversation. It is the data stored within a specific Session. It is used to manage information related only to the currently active session, such as the shopping cart content in the current conversation or user preferences mentioned during this session.
 
-**Memory:** Represents a storage system that may span multiple historical Sessions or incorporate information from external data sources. It serves as a knowledge base that the Agent can search to recall information or retrieve context beyond the current conversation.
+Memory: Represents an information storage system that may span multiple historical Sessions or include external data sources. It acts as a knowledge base, allowing the Agent to retrieve information through search or obtain contextual information beyond the current conversation.
 
-In addition to Chat APIs that manage memory automatically, there is another Session-based API pattern. For example, the Completion API does not send the conversation context; it only sends the current input and a session ID, while the server maintains the session history. Both Gemini and Claude support these two approaches. The client only needs to send the current input and the `session_id`, while the conversation history is maintained by the server, relieving developers from manually managing the conversation history.
+Besides Chat API managing Memory by itself, there is also another Session-based API pattern.
 
-It is important to note that both Chat APIs and traditional Completion APIs are fundamentally **stateless**. Both can include historical information or send only the current input. The primary difference lies in the input format and the way context is managed, rather than whether the model itself possesses memory.
+For example, the Completion API does not pass the context directly. Instead, it only sends the current state and session ID, while the server maintains the session. Both Gemini and Claude support these two approaches.
 
-Essentially, both approaches are implementations of **Conversation Memory**, and both are designed to solve the problem of short-term contextual memory.
+The client only needs to send the current input and session_id, while the historical records are maintained by the server, meaning developers do not need to manually manage Conversation History.
 
-*Conversational Context: Session, State, and Memory - Agent Development Kit (ADK)*
+It should be noted that both Chat API and traditional Completion API are essentially stateless. Both can include historical information, and both can send only the current input. The difference mainly lies in the input format and context management approach, rather than whether the model itself has memory capability.
 
-**Summarized Memory:** While short-term memory ensures conversational continuity, it does not scale well. As conversations become longer, replaying every message becomes increasingly inefficient and unreliable. Summarized memory addresses this problem.
+Essentially, both approaches are implementations of Conversation Memory, and both solve the problem of short-term context memory.
+
+Conversational Context: Session, State, and Memory - Agent Development Kit (ADK)
+
+**Summarized memory:**  
+Short-term memory can maintain conversation continuity, but it cannot scale indefinitely. As conversations become longer, blindly replaying every piece of information becomes inefficient and unreliable. Summarized memory solves this problem.
 
 It captures:
 
-> User intent  
-> Important facts  
-> Decisions and constraints
+> User intention  
+Important facts  
+Decisions and constraints
 
-It explicitly does **not** store:
+It explicitly does not store:
 
-> Every individual message  
-> Casual conversation  
-> Redundant confirmations
+> Every sentence  
+Casual conversations  
+Redundant confirmations
 
 https://medium.com/@sitaramireddy1994/summarized-memory-in-ai-agents-compressing-conversation-without-losing-intent-c0cf7678071c
 
-## **Sources of Agent Capabilities (Tools)**
+## **Agent Capability Sources (Tool)**
 
 ### Tool
 
-**Tools:** An LLM has no inherent ability to interact with the external environment. Without environmental interaction, it cannot perform any real-world actions. Tools are therefore considered part of the environment. They enable the model to obtain external information that is not contained within its pretrained parameters, typically through APIs. This is especially important because the knowledge stored in pretrained model weights is difficult to modify after training.
+Tools: LLMs do not have any ability to interact with the external environment by themselves. Without environmental interaction, they cannot perform external tasks, while Tools provide the way to access and interact with the environment.
 
-The availability of Tools and the permissions to use them are defined by the developer, while the decision of whether to invoke a particular Tool is made dynamically by the LLM within the Runtime according to the current task. Prompt engineering can activate or guide the model's existing capabilities, but these capabilities remain fundamentally constrained by the model's pretrained weights. Some models naturally possess stronger capabilities, whereas others may still perform poorly even with carefully designed prompts.
+However, LLMs can obtain additional information that is missing from model parameters through external APIs. This is especially important because model weights are difficult to modify after pre-training.
+
+The existence and permissions of Tools are defined by developers, while whether to call a specific Tool is dynamically determined by the LLM within the Runtime environment according to the current task.
+
+Prompt engineering can stimulate or guide the capabilities already existing in the model. However, these capabilities are fundamentally determined by the model itself, and the upper limit of capability still depends on model weights.
+
+Some models naturally have stronger capabilities, while some models may not achieve good results even with additional prompts.
 
 🧩🧩🧩
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig7.png)
+<div align="center">
 
-Tools define the capability boundary of an Agent. The Runtime is responsible for managing and orchestrating Tools, while the Tools themselves usually exist as independent components outside the Runtime (e.g., local functions, APIs, or MCP Servers). An LLM cannot invent new Tools on its own, nor can it automatically discover new Tools over the Internet. An Agent only possesses the capabilities provided by the Tools that developers have pre-integrated and registered with the Runtime.
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig7.png" width="70%">
 
-For example, even if a banking Agent knows how to order food delivery, it cannot complete the task if the Runtime has not integrated any food-ordering Tool.
+</div>
+
+Tool represents the capability boundary of an Agent.
+
+Runtime is responsible for managing and scheduling Tools, but Tools themselves usually exist as independent components outside the Runtime (such as local functions, APIs, or MCP Servers).
+
+LLM cannot create new Tools from nothing, nor can it automatically discover new Tools through the internet.
+
+Only Tools that are pre-integrated and registered into the Runtime by developers can provide corresponding capabilities to the Agent.
+
+Therefore, even if a banking Agent knows how to order food, it cannot complete the task if the Runtime does not integrate a food-ordering related Tool.
 
 ### MCP
 
-Even with the most advanced models, their effectiveness is significantly limited if they cannot connect to the external world to obtain the necessary data and context.
+Even with the most advanced models, performance can be greatly limited if they cannot connect to the external world to obtain necessary data and context.
 
-**The LLM is responsible for deciding whether to invoke a tool, the Runtime is responsible for invoking the tool, and MCP is responsible for providing a standardized communication protocol for tools.**
+**LLM is responsible for "making decisions based on tasks and tool descriptions, such as deciding whether to call a Tool"; Runtime is responsible for executing "Tool calls"; MCP is responsible for "providing a unified tool communication protocol".**
 
-- **Model Context Protocol (MCP)** is an open protocol that standardizes how AI applications connect to external tools and data sources. It can be understood as a unified tool integration standard (similar to how modern smartphones use the USB Type-C interface). MCP itself is not a Tool but a communication protocol used by the Runtime. Unlike ordinary tools, an MCP Server encapsulates tools as standardized black-box services. The MCP ecosystem enables LLM Agents to access hundreds of tools for solving real-world tasks. One of the greatest advantages of MCP Servers is their high reusability across different applications and Runtime implementations.
+- Model Context Protocol (MCP) is an open protocol that standardizes the connection between Agent applications and external Tools or data sources.
 
-- The purpose of MCP is to standardize the way AI applications connect to external tools and data sources. As long as an Agent application implements an MCP Client and the underlying model supports (or can be adapted to support) tool calling, the same set of MCP Servers can be reused without rewriting tool integration logic for every model.
+It can be understood as a unified Tool integration standard (similar to how all smartphones use the Type-C interface).
 
-> **Can tools bound directly to a LangGraph model eliminate the need for MCP when switching models?**
+It is also a type of capability used by Runtime. Unlike traditional Tools, its difference is that it provides a packaged black-box interface.
 
-Yes, but the switch cannot be completely modification-free. For example, suppose we define a set of standard tools in LangGraph:
+MCP Server can expose multiple Tools to Agent Runtime to solve real-world tasks.
 
-```python
+The advantage of MCP Server is its high reusability across applications (different Runtimes).
+
+- The significance of MCP is to unify the connection method between AI applications and external Tools or data sources.
+
+As long as an Agent application implements an MCP Client, and the model being used supports or can be adapted by the framework into a Tool-calling mode, the same group of MCP Servers can be reused without developing separate Tool integration code for each model.
+
+> **After binding Tools to a LangGraph model, can we switch models without using MCP?**
+It is possible, but the model cannot be switched without any modification.
+
+For example, in LangGraph, we can define a set of traditional Tools:
+
+```
 tools = [search_tool, database_tool, calculator_tool]
 ```
 
-Then bind them to the model:
+and then bind them to the model:
 
-```python
+```
 model_with_tools = model.bind_tools(tools)
 ```
+In theory, the model can be switched from OpenAI to another model that supports Tool Calling, such as Qwen.
 
-In theory, the model can be switched from OpenAI to another tool-calling model such as Qwen. LangChain tools are essentially callable functions with well-defined input and output schemas, which are passed to the chat model so that it can decide when to invoke them.
+The Tools in LangChain essentially have clearly defined input and output structures. They can be treated as callable functions and passed to the chat model, allowing the model to decide when to call them.
 
-> However, the following points should be noted:
+> However, it should be noted that:
+>
+> The new model must support Tool Calling.  
+> Different models do not have completely identical Tool Calling capabilities.  
+> A traditional LangGraph Tool is not equivalent to an MCP Tool.
 
-- The new model must support tool calling.
-- Different models do not provide identical tool-calling capabilities.
-- A standard LangGraph Tool is **not** the same as an MCP Tool.
+**The advantage of directly binding Tools to LangGraph is simplicity, making it suitable for individual projects. When switching models, the LangGraph workflow and Tools can usually be reused, but the model adapter needs to be replaced, and the new model's Tool Calling capability must be verified.**
 
-**The advantage of binding tools directly to LangGraph is its simplicity, making it suitable for standalone projects. When switching models, the LangGraph workflow and tools can usually be reused, although the model adapter must still be replaced and the new model must be verified to support tool calling.**
+**Using MCP provides a stronger decoupling between the Tool layer and the model layer, but it does not mean that switching to any model requires zero modification.**
 
-**Using MCP further decouples the tool layer from the model layer, but it does not guarantee completely modification-free model switching.**
+- From an engineering perspective, MCP Server can essentially be understood as a Wrapper. It encapsulates real capabilities such as APIs, databases, RAG systems, and search engines into a unified standard interface for Runtime to call.
 
-- From an engineering perspective, an MCP Server can essentially be regarded as a **wrapper** that encapsulates APIs, databases, RAG systems, search engines, and other capabilities behind a standardized interface that can be invoked by the Runtime.
+- However, MCP is also a relatively "heavyweight" solution. Since all capabilities need to be packaged according to the MCP specification, it is similar to carrying a complete toolbox.
 
-- However, MCP is also a relatively "heavyweight" solution. Since every capability must be packaged according to the MCP specification, it is similar to carrying an entire toolbox. For large-scale systems, complex Agents, and multi-model environments, this standardization provides tremendous scalability. However, for simply invoking a single tool, directly calling an API is often much lighter and may not require introducing the entire MCP ecosystem.
+For large-scale systems, complex Agents, and multi-model scenarios, this standardization provides significant scalability. However, if the requirement is simply to call a single Tool, directly calling an API is often more lightweight, and introducing the entire MCP ecosystem may not be necessary.
 
 ### Tool Calling
 
-- Many tools can be packaged as MCP Server interfaces that are accessed through an MCP Client. Why package them as MCP Servers instead of connecting directly to the APIs? This is mainly an engineering consideration. Models change frequently—for example, today's application may use GPT, while tomorrow's may switch to Qwen. Their native interfaces differ, requiring integration code to be rewritten. By wrapping tools as MCP Servers, different models only need to support the MCP interface. Although each model may have its own internal format, they can all communicate through MCP, allowing model replacement without modifying the underlying tool integrations.
+- Some Tools can be packaged into MCP Server interfaces and provided to MCP Clients. However, it should be noted that Tools do not necessarily need to be converted into MCP format.
 
-- An MCP Client only knows that a particular tool is needed; it does not know how the tool itself works. Its responsibility is simply to invoke the corresponding MCP Server. This is where frameworks such as LangGraph become valuable. Permission control should **not** be left to the LLM because hallucinations may lead to incorrect decisions. Instead, a permission verification step can be inserted before the tool call. Once the Agent Runtime completes the authorization check, it can safely invoke the MCP Client.
+Traditional Agents can directly bind Tools, while MCP provides a standardized approach to encapsulate Tools.
 
-- An MCP Server can be understood as a server that packages external tools, databases, file systems, search services, or business APIs into a unified protocol. The MCP Client, running inside the Agent Runtime, is responsible for discovering tools, reading their descriptions, invoking them, and receiving their results. As a result, changes to the underlying model or upper-level framework do not require rewriting all tool integrations.
+Why package Tools into an MCP Server first instead of directly connecting to them? Why not directly integrate APIs?
 
-The actual business logic still resides behind the MCP Server in APIs, databases, or backend services. The Agent Runtime interacts with them only through standardized protocol interfaces.
+This is mainly an engineering design consideration.
 
-In practice, directly binding Tools in LangGraph is more common than using MCP.
+When different Agents need to share the same Tools, MCP enables "develop once, use in multiple places." MCP solves the reusability problem at the Tool layer and reduces the cost of modifying the Tool layer when changing models.
+
+However, its core goal is not model migration, but rather the standardization and reuse of Tool capabilities.
+
+The prerequisite for using MCP is that the Agent Runtime implements an MCP Client, and the Runtime can expose Tool Calling capabilities to the LLM.
+
+```
+For example:
+
+Claude Desktop -> MCP Client -> MCP Server
+
+LangGraph -> MCP Client -> MCP Server
+
+Both Runtimes can call the same Tool.
+```
+
+- MCP Client is responsible for connecting to the Server, obtaining Tool descriptions, initiating calls, and returning results to the Runtime. Within the Agent Runtime, it is responsible for discovering Tools, reading Tool descriptions, initiating calls, and receiving results. Therefore, when the model or upper-level framework changes, the underlying Tool integration method does not need to be completely rewritten.
+
+- MCP Server can be understood as a server that wraps external Tools, databases, file systems, search services, or business APIs into a unified protocol.
+
+The actual business logic still exists in the APIs, databases, or services behind the MCP Server. The Agent Runtime only calls them through standardized protocol interfaces.
+
+In practical scenarios, directly binding Tools in LangGraph is more common than using MCP.
 
 ### Skill
 
-- A **Skill** can be understood as an **on-demand loaded task instruction manual**. It is not a new Tool, but rather a package containing the knowledge, workflow, and Tool usage required to accomplish a specific category of tasks.
+- Skill (Skill Package) belongs to the Agent capability layer. It is used to tell the Agent how to complete a certain type of task, including execution workflows, which Tools to use, and what constraints to follow.
 
-- In traditional Tool Calling, the Runtime typically provides the LLM with the names, descriptions, and invocation methods of all available Tools in advance, allowing the model to determine which Tool to call. When the number of Tools becomes large, these descriptions consume a significant portion of the available context, increase Prompt length, and reduce reasoning efficiency.
+It can be understood as an on-demand loading task instruction manual. It is not a new Tool, but rather an encapsulation of the knowledge, workflows, and Tools required to complete a specific type of task.
 
-- The core idea behind Skills is **on-demand loading**. Instead of providing the model with every task description and tool specification at startup, the Runtime loads only the Skill corresponding to the user's current task. For example, when a user wants to analyze an Excel file, the Runtime loads the **Excel Analysis Skill** instead of simultaneously loading Skills related to GitHub, databases, or browsers.
+- In traditional Tool Calling, the Runtime usually needs to provide all Tool names, functional descriptions, and calling methods to the LLM in advance, allowing the model to determine which Tool should be called.
 
-- A Skill can be regarded as a compressed **Instruction Manual**. Although an LLM may already possess the fundamental ability to complete a task, different Runtime environments or enterprise systems often have their own workflows, conventions, and preferred ways of using tools. Without this instruction manual, the model has no knowledge of the recommended workflow, which Tools should be prioritized, or how each step should be organized. The role of a Skill is therefore to provide this additional guidance at the beginning of the task so that the model can complete the task according to the Runtime's conventions.
+When there are many Tools, these descriptions consume a large amount of Context, increase Prompt length, and may also affect the model's reasoning efficiency.
 
-> A Skill typically contains:
+- The design idea of Skill is on-demand loading.
 
-- The objective and applicable scenarios of the current task;
-- The recommended execution workflow;
-- Best practices and constraints;
-- The Tools or scripts required for the task, together with instructions for using them.
+The Runtime does not provide all task knowledge and Tool descriptions to the model at the beginning. Instead, it first loads the corresponding Skill according to the user's current task type.
 
-It is important to note that a Skill **does not execute tasks** and **does not provide Tools**. Instead, it acts as a **user guide**, telling the model:
+For example, when a user wants to analyze an Excel file, the Runtime only loads the Excel Analysis Skill at that time, rather than loading GitHub, database, or browser-related Skills simultaneously.
 
-> "To complete this task, these are the recommended steps, and these are the Tools that should be invoked."
+- Skill can be understood as a compressed instruction manual (Instruction Manual).
 
-The actual execution is still performed by the Tools provided by the Runtime (either local Tools or Tools exposed through MCP Servers).
+Although LLMs may already have the basic ability to complete tasks, different enterprise systems often have their own workflows, standards, and Tool usage methods.
+
+Without this instruction manual, the model does not know which workflow the current system recommends, which Tools should be prioritized, or how each step of the task should be organized.
+
+The role of Skill is to provide these additional instructions to the model at the beginning of a task, allowing the model to complete tasks according to the specifications of the current Runtime.
+
+
+> A Skill usually contains the following contents:
+>
+> The goal and applicable scenarios of the current task;  
+> Recommended execution workflow;  
+> Best practices and constraints;  
+> Which Tools or scripts are required for the current task, and how to use these Tools.
+
+It should be noted that Skill itself does not execute tasks and does not actually provide Tools.
+
+Skill is more like a "user guide". It only tells the model:
+
+"To complete this task, which steps are recommended and which Tools should be called."
+
+The actual execution is still performed by the Tools provided by the Runtime (such as local Tools or Tools provided through MCP Server).
 
 **Relationship between Skill, MCP, and LLM**
 
-- Skill, LLM, and MCP each belong to different layers of an Agent architecture. The LLM is responsible for understanding tasks and making reasoning decisions. A Skill is an on-demand loaded task guide that provides workflows, best practices, and recommended Tools for completing a particular category of tasks. MCP is a standardized communication protocol that enables the Runtime to connect to and invoke external Tools in a consistent manner. Skills do not execute tasks, and MCP does not guide task execution. Together, they help the LLM complete complex tasks more efficiently and in a more standardized way.
+- Skill, LLM, and MCP are located at different layers of an Agent system.
 
-- Skill and MCP may coexist, but they are independent of each other. An Agent may use both Skill and MCP, or it may use only one of them.
+LLM is responsible for understanding tasks and performing reasoning and decision-making.
 
-> A Skill serves as a **guide**. Without it, the LLM can still complete tasks, although it may lack standardized workflows and best practices.
+Skill is an on-demand loaded task instruction manual that provides LLM with workflows, best practices, and recommended Tools for completing a certain type of task.
 
-> MCP serves as a **connector**. Without it, the Runtime can still invoke local functions, SDKs, or APIs as Tools. However, those Tools usually need to be adapted separately for different Runtime environments or Agent frameworks. When the same set of Tools needs to be shared across multiple Runtimes (such as LangGraph, Claude Desktop, Cursor, or the OpenAI Agents SDK), developers may otherwise need to repeatedly develop and maintain different integration interfaces. MCP solves this problem by encapsulating Tools as standardized MCP Servers, allowing multiple Runtimes to reuse the same Tool implementations without rewriting the integration logic for every platform.
+MCP is a unified Tool communication protocol that enables the Runtime to connect and call various external Tools in a consistent way.
 
----
+Skill does not execute tasks, and MCP does not guide task execution. Together, they help LLM complete complex tasks more efficiently and systematically.
+
+- Skill and MCP may appear together, but they do not depend on each other.
+
+An Agent can use both Skill and MCP, or only use one of them.
+
+> Skill is a "guide". Without it, LLM can still complete tasks, but it may lack standardized workflows and best practices.
+
+Without MCP, Runtime can still directly call local functions, SDKs, or APIs to use Tools.
+
+However, these Tools usually need to be adapted separately for different Runtimes or Agent frameworks.
+
+When the same set of Tools needs to be shared across multiple Runtimes (such as LangGraph, Claude Desktop, Cursor, OpenAI Agents SDK, etc.), developers may need to repeatedly develop and maintain different interfaces.
+
+MCP solves this problem by using a unified protocol to package Tools into standardized MCP Servers, allowing different Runtimes to reuse the same Tools without developing separate integration logic for each platform.
+
+
 
 ## RAG
 
-**Retrieval-Augmented Generation (RAG)** is a technique that enhances the output of a Large Language Model by allowing it to reference authoritative knowledge sources beyond its training data before generating a response. Large Language Models (LLMs) are trained on massive datasets containing billions of parameters to perform tasks such as question answering, translation, and text completion. Building upon these capabilities, RAG extends the model by enabling access to domain-specific or organization-specific knowledge bases without requiring retraining. It provides a cost-effective way to improve the relevance, accuracy, and usefulness of LLM-generated responses across a wide variety of scenarios.
+Retrieval-Augmented Generation (RAG) refers to optimizing the output of large language models by allowing them to reference authoritative knowledge bases outside the training data before generating responses.
 
-### RAG Workflow
+Large Language Models (LLMs) are trained on massive datasets and use billions of parameters to generate outputs for tasks such as answering questions, translating languages, and completing sentences.
+
+Based on the powerful capabilities of LLMs, RAG extends them by enabling access to internal knowledge bases of specific domains or organizations without retraining the model.
+
+This provides a cost-effective method to improve LLM outputs, allowing them to maintain relevance, accuracy, and usefulness in different scenarios.
+
+### RAG Pipeline
 
 🧩🧩🧩🧩
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig8.png)
+<div align="center">
 
-A complete RAG pipeline typically consists of the following stages: **document preprocessing and chunking, embedding generation, query rewriting or expansion, retrieval, reranking, context compression, source citation preservation, LLM generation, and answer validation.**
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig8.png" width="70%">
 
-Before introducing RAG, an LLM's knowledge is limited to its training data. After introducing RAG, the system first retrieves relevant external information, then supplies that information to the LLM. The model itself remains unchanged, but the Prompt becomes enriched with retrieved context.
+</div>
+
+A complete RAG pipeline usually includes:
+
+Document cleaning and splitting (chunking), embedding database construction, query rewriting or expansion, retrieval, reranking, context compression, citation preservation, LLM generation, and answer verification.
+
+Before adding RAG, the knowledge source of LLMs mainly comes from training data.
+
+After adding RAG, the system first retrieves relevant information and then provides the retrieved content to the LLM.
+
+The internal knowledge of the LLM itself does not change, but the input prompt becomes longer because additional retrieved context is added.
 
 ### Chunking
 
-Chunking refers to splitting long documents into smaller segments before storing them in a vector database.
+Long documents are split into smaller segments and stored in the vector database.
 
-- If the chunks are too small (e.g., 100 tokens), important context may be lost. For example, one chunk may say, "This method is applicable to the above scenario," while the actual "above scenario" appears in the previous chunk. Even if retrieved, the LLM cannot understand the reference.
+- If the chunks are too small, for example, each segment contains only 100 tokens, important context may be lost.
 
-- If the chunks are too large (e.g., 2000 tokens), the context remains complete, but the semantic representation becomes diluted by irrelevant information, reducing retrieval accuracy.
+For example, one segment may only contain:
 
-There is no universally optimal chunk size. It should be adjusted according to the document type and task. General documents typically use chunk sizes of approximately **300–800 tokens**. Code and tables are usually split according to their structure. Titles, section headings, and metadata should also be preserved whenever possible.
+"This method is suitable for the above situation."
 
-Overlap is often introduced to prevent important information from being split across chunk boundaries. A common overlap ratio is **10%–20%**.
+However, the explanation of "the above situation" appears in the previous segment. After retrieval, the LLM may still not understand the meaning.
+
+- If the chunks are too large, for example, each segment contains 2000 tokens, although the context is more complete, the semantic information may become too mixed.
+
+The embedding representation may be diluted by many irrelevant details, resulting in inaccurate retrieval.
+
+Chunk size usually does not have a fixed optimal value. It should be adjusted according to document type and task requirements.
+
+General documents are usually around 300-800 tokens.
+
+Code and tables usually need to be split according to their structures.
+
+It is important to preserve titles, sections, and metadata.
+
+Sometimes overlap is used to prevent answers from being cut off exactly at chunk boundaries. A common overlap ratio is 10%-20%.
 
 ### Embedding
 
-In RAG, the **Embedding** model is usually a separate model that functions as a semantic indexing tool. It converts documents into vectors, which are then stored in a vector database.
+Embedding in RAG is usually a separate model. It can be understood as a semantic indexing tool that converts documents into vectors and stores them in a vector database.
 
 > Example:
 >
 > Suppose you have a document:
 >
-> *"Harry Potter is a fantasy novel."*
+> "Harry Potter is a magic novel."
 >
-> The embedding model converts the document into a vector and stores it in the vector database.
+> The Embedding model converts it into a vector and stores it in the vector database.
 >
 > When a user asks:
 >
-> *"Where can I find Harry Potter?"*
+> "Where can I find Harry Potter?"
 >
-> the query is also converted into a vector.
+> The query is also converted into a vector.
 >
-> The system compares the similarity between:
+> The system compares whether the two vectors are close:
 >
-> **User query vector vs. Document chunk vector**
+> User query vector vs. document chunk vector.
 >
-> If the distance between them is sufficiently small, they are considered semantically related. The corresponding document chunk is retrieved and passed to the LLM for answer generation.
+> If the distance is close, it means the semantics are related. The corresponding document segment is retrieved and then provided to the LLM for answering.
 
-Choosing an embedding model depends on the language, domain, and benchmark performance. For Chinese applications, models such as **BGE**, **M3E**, **E5**, and the **text-embedding** series are common choices. Higher embedding dimensions are not necessarily better—they increase storage and retrieval costs. For domain-specific applications, embedding fine-tuning or hybrid retrieval can also be considered.
+Choosing an embedding model depends on language, domain, and evaluation results.
+
+For Chinese scenarios, models such as BGE, M3E, E5, and text-embedding series can be considered.
+
+Higher dimensionality does not always mean better performance, because it increases storage and retrieval costs.
+
+When the domain difference is large, fine-tuning the embedding model or introducing hybrid retrieval can be considered.
 
 ### Retrieval
 
-When the system receives a query, it does **not** immediately ask the LLM. Instead, it first searches the relevant knowledge base and retrieves semantically related content to augment the context before passing it to the model.
+After receiving a Query, the system does not ask the LLM first.
+
+Instead, it searches the relevant knowledge base and uses the retrieved results to enhance the context.
 
 ### Reranking
 
-Retrieval often returns many candidate documents, but only a small subset should be provided to the LLM. The challenge is how to reliably select the most relevant results and prevent the LLM from hallucinating when no suitable information exists.
+The retrieval process may return many candidates, but we usually only need the most relevant top results.
 
-Retrieval aims to maximize recall by retrieving as many potentially relevant documents as possible, whereas **Reranking** selects the most appropriate document chunks to include in the context. Their objectives differ:
+The challenge is how to ensure that the retrieved content is the best choice and how to prevent the LLM from generating incorrect answers when relevant information does not exist.
 
-- **Retrieval:** Prioritizes high recall, even if more candidate documents are returned.
-- **Reranking:** Optimizes quality while controlling token consumption by selecting only the most relevant results.
+Retrieval focuses on recalling as much relevant information as possible.
+
+Rerank focuses on selecting the most suitable segments from candidate results to place into the Context.
+
+The goals of the two stages are different:
+
+During retrieval, it is acceptable to retrieve more candidates.
+
+During reranking, the system controls quality and token cost.

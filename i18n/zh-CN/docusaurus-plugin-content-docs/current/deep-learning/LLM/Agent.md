@@ -5,22 +5,34 @@
 
 **Agent的组成部分** 
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig1.png)
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig1.png" width="70%">
+
+</div>
 
 图片来源：https://www.bilibili.com/video/BV1uNk1YxEJQspm_id_from=333.788.videopod.episodes&vd_source=cdbd526603d180d53ccd6caa6a2ec439&p=8
+
 
 工程上实现可以拆分出四个核心模块：推理、记忆、工具、行动
 
 ### Agent完整工作流程
-我们认为，只是简单的LLM（Prompt）不能被称为Agent，Agent系统的基本构建模块是一个通过检索、工具和内存等增强功能的LLM。现有的模型可以主动利用这些能力，生成自己的搜索查询，选择合适的工具并确定要保留哪些信息。
+Agent 是一个能够感知环境、进行推理决策、调用工具并根据反馈持续完成任务的软件系统。LLM通常作为Agent的推理核心，但Agent并不等同于LLM。我们认为，只是简单的LLM（Prompt）不能被称为Agent，Agent系统的基本构建模块是一个通过检索、工具和内存等增强功能的LLM。现有的模型可以主动利用这些能力，生成自己的搜索查询，选择合适的工具并确定要保留哪些信息。
 
 🧩🧩🧩
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig2.png)
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig2.png" width="70%">
+
+</div>
 
 Agent的重点不在于模型，而是让模型真正具备完成任务的能力。
 
 🧩🧩🧩🧩
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig3.png)
+
+<div align="center">
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig3.png" width="70%">
+</div>
 
 Agent 决策流程图
 
@@ -40,7 +52,7 @@ Agent 决策流程图
 LLM 在整个框架中更像是负责推理和决策的大脑，但它本身并不能直接与外界交互，也不能直接面向用户。没有 Runtime 的话，即使模型知道应该怎么做，也没有执行环境，就像一个人被放在虚无之中，无法真正完成任何任务。
 
 **LLM回答的方式：**
-从本质上来说，LLM 的回答方式其实只有一种：
+LLM本身只负责根据输入生成输出，在Agent框架中会通过Runtime构建循环，一种常见的执行模式是ReAct（Reasoning-Acting）循环。：
 > 思考（Reason）
 如果需要则调用工具（Act）
 得到结果（Observation）
@@ -71,14 +83,19 @@ Runtime 本质是AI Agent 的执行基础设施。它管理Agent的生命周期�
 管理 Memory； 
 调用 Tool； 
 控制工作流； 
-处理权限和异常； 
-组织 Context； 
+处理权限和异常；
+决定那些信息进入 Context； 
 与外部环境交互。
 
 🧩🧩🧩
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig4.png)
+<div align="center">
 
-典型runtime
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig4.png" width="70%">
+
+</div>
+
+
+**典型runtime**
 
 当 LLM 判断需要使用工具时，它会把 Tool Call 的意图交给 Runtime，再由 Runtime 通过 MCP Client 调用对应的 MCP Server。
 
@@ -90,12 +107,17 @@ Runtime 本质是AI Agent 的执行基础设施。它管理Agent的生命周期�
 
 ### Context
 LLM 每轮并不是只看当前一句话，而是会同时接收 system prompt、工具列表、对话历史、session/user state、权限状态、检索结果和当前用户输入。Runtime 负责把这些信息组织成可控的执行流程。
-Context表示大模型每次处理任务时所接收到的信息总和。Context中有很多内容包括对话历史、用户问题、当前输出、工具列表以及system prompt等，可以理解为大模型的临时记忆体。
+Context表示大模型每次处理任务时所接收到的信息总和。Context中有很多内容包括对话历史、用户问题、当前输出、工具列表以及system prompt等，Context是模型当前一次推理所接收到的信息，而Memory是系统长期保存信息的机制。Context是一次性的输入，Memory是用于生成Context的数据来源。
 主流模型的context window 大小（上下文）表示大模型每次接收任务时能容纳的最大token数量。
 而Context能有多大，里面有多少tokens由context window来表示。
 
 🧩🧩🧩
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig5.png)
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig5.png" width="70%">
+
+</div>
+
 
 注意Context window并不等于Memory。
 
@@ -105,9 +127,6 @@ Context表示大模型每次处理任务时所接收到的信息总和。Context
 
 记忆Memory：分为短期记忆以及长时间记忆。
 
-**形成记忆：** 
-
-大模型在大量包含世界知识的数据集上进行预训练，在预训练中，大模型通过调整神经元的权重来学习和理解生成人类语言，被视为“记忆”的形成过程，通过使用深度学习和梯度下降等技术，不断提高预测或者生成文本的能力进而形成长期记忆。存在硬件中不会遗忘。
 
 **短期记忆/工作记忆**
 
@@ -124,7 +143,11 @@ Context表示大模型每次处理任务时所接收到的信息总和。Context
 - 列表项向量化存储：通过向量数据库实现基于语义的记忆检索。
 长期记忆使智能体能够随着时间累积经验和知识，它特别适用于知识密集型应用和需要长期个性化的场景。
 
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig6.png)
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig6.png" width="70%">
+
+</div>
 
 ---
 
@@ -155,17 +178,22 @@ https://medium.com/@sitaramireddy1994/summarized-memory-in-ai-agents-compressing
 
 ## **Agent 能力来源（Tool）**
 ### Tool
-工具Tools：LLM是不具备任何与外部环境交互的能力的，没有环境交互他不能做任何事情，而工具是环境的一部分。但是它可以通过外接API的形式来获得模型权重所缺少的额外信息。 这对于预训练之后难以修改的模型权重来说是非常重要的。Tool 的存在和权限由开发者定义，而是否调用某个 Tool，则由 LLM 在 Runtime 环境下根据当前任务动态决定。可以通过提示工程激发或者引导模型已有的能力，但是实际上这些能力是固化的，能力上限依然由模型的权重决定，有些模型天生能力就强但是有些模型加入提示词也不会有很好的结果。
+工具Tools：LLM是不具备任何与外部环境交互的能力的，没有环境交互他不能做任何事情，而工具是访问环境的方法。但是它可以通过外接API的形式来获得模型权重所缺少的额外信息。 这对于预训练之后难以修改的模型权重来说是非常重要的。Tool 的存在和权限由开发者定义，而是否调用某个 Tool，则由 LLM 在 Runtime 环境下根据当前任务动态决定。可以通过提示工程激发或者引导模型已有的能力，但是实际上这些能力是固化的，能力上限依然由模型的权重决定，有些模型天生能力就强但是有些模型加入提示词也不会有很好的结果。
 
 🧩🧩🧩
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig7.png)
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig7.png" width="70%">
+
+</div>
 
 Tool 是 Agent 能力的边界。Runtime 负责管理和调度 Tool，但 Tool 本身通常作为独立组件存在于 Runtime 外部（例如本地函数、API 或 MCP Server）。LLM 无法凭空创造新的 Tool，也不会自动联网发现新的 Tool。只有开发者预先接入并注册到 Runtime 的 Tool，Agent 才具备相应的能力。因此，一个银行 Agent 即使知道如何点外卖，如果 Runtime 中没有接入点餐相关的 Tool，它也无法完成该任务。
 
 ### MCP
 即使拥有最前沿的模型，如果无法连接外部世界获得必要数据和上下文，效果就会大打折扣。
-**LLM 负责"决定是否调用工具"，Runtime 负责"调用工具"，MCP 负责"统一工具通信协议"。**
-- 模型上下文协议（MCP）这是一个开源协议，它标准化了大语言模型的连接与工作方式。可以理解为一套统一的工具接入标准（比如所有的手机都是type-C接口）。也是一个runtime使用的工具，与其他工具不同的地方就在于他是一个打包好的黑盒。MCP协议可以为LLMAgent提供数百种工具来解决现实任务。MCP服务器的优势在于跨应用(不同的runtime)的高度可复用性。
+**LLM 负责"根据任务和工具描述进行决策，例如决定是否调用工具"，Runtime 负责执行"调用工具"，MCP 负责"统一工具通信协议"。**
+- 模型上下文协议（MCP）这是一个开源协议，标准化了Agent应用与外部工具、数据源之间的连接方式。可以理解为一套统一的工具接入标准（比如所有的手机都是type-C接口）。也是一个runtime使用的工具，与其他工具不同的地方就在于他是一个打包好的黑盒。MCP Server可以为Agent Runtime暴露多个工具来解决现实任务。MCP服务器的优势在于跨应用(不同的runtime)的高度可复用性。
 
 - MCP 的意义在于统一 AI 应用与外部工具、数据源之间的连接方式。只要某个 Agent 应用实现了 MCP Client，并且所使用的模型支持或能够被框架适配为工具调用模式，就可以复用同一批 MCP Server，而不需要为每个模型重新开发工具接入代码。
 > **把工具绑定到LangGraph模型后是否可以不用MCP进行切换模型？**
@@ -189,19 +217,27 @@ model_with_tools = model.bind_tools(tools)
 - 从工程角度看，MCP Server 本质上可以理解为一个 Wrapper，它把真实的 API、数据库、RAG、搜索引擎等能力统一封装成标准接口供 Runtime 调用。
 - 不过，MCP 也是一种比较“重”的方案。因为所有能力都需要按照 MCP 规范进行包装，就像随身携带一个完整工具箱。对于大型系统、复杂 Agent 和多模型场景，这种标准化带来了巨大的扩展性；但如果只是简单调用一个工具，那么直接调用 API 往往更加轻量，不一定需要引入整个 MCP 体系。
 ### Tool Calling
-- 有的tool都会被打包成一个MCP server 接口给MCP client。为什么要先打包成MCPserver而不是直接连接呢？ 为什么不能直接把api接过来呢？这里是工程学的东西，因为模型是一直换的，比如今天使用GPT，明天换成Qwen，他们的接口是不一样的，换了要重写。但所有模型都支持MCP接口，也许有自己的格式但是都会支持MCP接口，这样换模型就不需要进行修改了。
-- MCP client 只是知道需要这个tool，不会知道具体怎么做，但是会帮忙call mcpserver这就是LangGraph的用处，不能让：LLM做权限控制，因为会有幻觉。我们可以在call tool之前先插入一个权限验证，过了之后agent runtime 过了之后再call MCP client。
-- MCP Server 可以理解为把外部工具、数据库、文件系统、搜索服务或业务 API 包装成统一协议的服务端；MCP Client 则在 Agent Runtime 中负责发现工具、读取工具描述、发起调用并接收结果。这样模型或上层框架变化时，底层工具接入方式不需要全部重写。
+- 有的tool会被打包成一个MCP server 接口给MCP client，但是注意Tool本身不一定需要MCP化。传统Agent可以直接绑定Tool，而MCP提供了一种标准的方式，将Tool封装为为什么要先打包成MCPserver而不是直接连接呢？ 为什么不能直接把api接过来呢？这里是工程学的东西，不同的Agent之间共享工具，有了MCP就可以一次开发多处使用，MCP解决了Tool层服用的问题，MCP降低了模型切换时工具层修改的成本，但它的核心目标不是模型迁移，而是工具能力的标准化和复用。使用MCP的前提是Agent Runtime 实现了MCP Client，同时Runtime 能够将工具调用的能力暴露给LLM。
+
+```
+例如
+Claude Desktop -> MCP Client -> MCP Server
+LangGraph -> MCP Client -> MCP Server
+两个Runtime都可以调用同一个工具
+```
+
+- MCP client 负责连接Server，获取工具描述，发起调用，返回结果给Runtime。在 Agent Runtime 中负责发现工具、读取工具描述、发起调用并接收结果。这样模型或上层框架变化时，底层工具接入方式不需要全部重写。
+- MCP Server 可以理解为把外部工具、数据库、文件系统、搜索服务或业务 API 包装成统一协议的服务端。
 真正的业务逻辑仍然在 MCP Server 背后的 API、数据库或服务中，Agent Runtime 只通过协议化接口调用它们。
 实际场景中LangGraph绑Tools的情况会比使用MCP的情况多。
 ### Skill
-- Skill（技能包）可以理解为一种按需加载（On-demand Loading）的任务说明书，它并不是新的 Tool，而是对完成某类任务所需知识、流程和工具的封装。
+- Skill（技能包）属于Agent能力层，用于告诉Agent如何完成某一类任务，包括执行流程，使用哪些工具以及遵守哪些约束。可以理解为一种按需加载（On-demand Loading）的任务说明书，它并不是新的 Tool，而是对完成某类任务所需知识、流程和工具的封装。
 
 - 在传统的 Tool Calling 中，Runtime 往往需要提前将所有 Tool 的名称、功能描述和调用方式提供给 LLM，使模型能够判断应该调用哪个 Tool。当 Tool 数量很多时，这些描述会占用大量上下文（Context），增加 Prompt 长度，也会影响模型的推理效率。
 
 - Skill 的设计思想就是按需加载。Runtime 在开始时并不会把所有任务知识和工具说明都提供给模型，而是先根据当前用户的任务类型，加载对应的 Skill。例如，当用户希望分析 Excel 文件时，Runtime 才会加载 Excel Analysis Skill，而不会同时加载 GitHub、数据库或浏览器相关的 Skill。
 
-- 可以将 Skill 理解为一份压缩后的说明书（Instruction Manual）。LLM 虽然可能已经具备完成任务的基础能力，但不同 Runtime 或企业系统往往有自己的工作流程、规范以及工具使用方式。如果没有这份说明书，模型并不知道当前系统推荐采用什么流程、应该优先调用哪些 Tool、每一步应该如何组织任务。而 Skill 的作用，就是在任务开始时为模型提供这些额外的指导信息，使模型能够按照当前 Runtime 的规范完成任务。
+- 可以将 Skill 理解为一份压缩后的说明书（Instruction Manual）。LLM 虽然可能已经具备完成任务的基础能力，但不同企业系统往往有自己的工作流程、规范以及工具使用方式。如果没有这份说明书，模型并不知道当前系统推荐采用什么流程、应该优先调用哪些 Tool、每一步应该如何组织任务。而 Skill 的作用，就是在任务开始时为模型提供这些额外的指导信息，使模型能够按照当前 Runtime 的规范完成任务。
 
 
 > 一个 Skill 通常会包含以下内容：
@@ -226,7 +262,12 @@ model_with_tools = model.bind_tools(tools)
 ### RAG流程
 
 🧩🧩🧩🧩
-![fig1](https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig8.png)
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Linshu-Song/SAIL_image_hosting/main/Agentimg/fig8.png" width="70%">
+
+</div>
 
 一个完整 RAG 链路通常包括：文档清洗与切分（chunking）、embedding 建库、query 改写或扩展、retrieval 召回、rerank 重排、上下文压缩、引用来源保留、LLM 生成和答案校验。
 在加入RAG之前，LLM的知识来源就只有训练数据，加入RAG之后就会先去找相关的资料，然后把资料交给LLM，LLM的内容不变但是prompt变长了
