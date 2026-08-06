@@ -1,0 +1,474 @@
+---
+sidebar_position: 1
+title: LangChain 框架
+description: 使用 LangChain 构建 LLM 应用——提示词、记忆、RAG、工具调用与多智能体工作流，并与 uv 集成。
+---
+
+# LangChain 框架
+
+LangChain 是一个用于构建 LLM 应用的工具集。它负责处理提示词、记忆、文档检索（RAG）、工具调用以及多智能体工作流——并与 `uv` 集成，以实现快速、可复现的 Python 环境。
+
+---
+
+## 前置条件
+
+- Python 3.10+
+- `uv`（[安装](https://docs.astral.sh/uv/)）
+- OpenAI API 密钥（或其他 LLM 提供商）
+
+---
+
+## 核心架构
+
+| 层级 | 领域 | 职责 | 关键组件 |
+|-------|--------|----------------|----------------|
+| 编排层 | `LangGraph` | 有状态的多智能体图、循环、人机协同 | `StateGraph`、`MessagesState` |
+| 接口基类 | `langchain-core` | 执行原语、LCEL 管道协议 | `Runnable`、`ChatPromptTemplate` |
+| 集成层 | `langchain-community` | 第三方模型、向量存储、加载器 | `Chroma`、`ChatOpenAI`、`PyPDFLoader` |
+| 可观测性 | `LangSmith` | 追踪、成本监控、评估 | 自动化追踪注入 |
+
+### 组件职责
+
+| 组件 | 语言 | 用途 |
+|-----------|----------|---------|
+| LCEL 引擎 | Python/Rust | 统一的流式、批处理、异步 |
+| 模型 I/O | Python | 提示词、配置、token schema |
+| 数据检索 | Python | 文档加载、切分、嵌入 |
+| 工具执行 | Python | 带校验的函数调用 |
+
+---
+
+## 项目结构（uv）
+
+```
+langchain-project/
+├── pyproject.toml        # 依赖与配置
+├── uv.lock               # 锁定文件（提交）
+├── .python-version       # Python 版本锁定
+├── .env                  # API 密钥（gitignore）
+├── src/app_orchestrator/
+│   ├── __init__.py
+│   ├── tools.py          # @tool 定义
+│   ├── chains.py         # LCEL 管道
+│   └── graph.py          # LangGraph 状态图
+└── tests/
+    ├── conftest.py
+    └── test_chains.py
+```
+
+**安装：**
+
+```bash
+uv add langchain-core langchain-openai langchain-community
+uv add langchain-chroma langchain-text-splitters langsmith
+uv add langgraph fastapi uvicorn langgraph-supervisor
+uv add --dev pytest ruff mypy
+uv sync
+```
+
+> **注意：** `langgraph-supervisor` 是用于多智能体 supervisor 模式的附加包。
+
+---
+
+## LCEL——LangChain 表达式语言
+
+LCEL 通过管道操作符 `|` 串联组件。
+流程：`输入 → 提示词 → 模型 → 解析器 → 输出`
+
+### Runnable 方法
+
+| 方法 | 异步版本 | 行为 |
+|--------|-------|-----------|
+| `invoke(input)` | `ainvoke` | 单次调用，返回完整结果 |
+| `stream(input)` | `astream` | 按到达顺序逐个产出 token |
+| `batch([inputs])` | `abatch` | 并行处理 |
+
+### 基础链
+
+```python
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "Answer: {question}")
+])
+model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+parser = StrOutputParser()
+
+chain = prompt | model | parser
+answer = chain.invoke({"question": "What is RAG?"})
+```
+
+### 流式辅助工具
+
+| 辅助工具 | 用途 |
+|--------|---------|
+| `RunnablePassthrough()` | 原样传递输入 |
+| `RunnableLambda(func)` | 包装任意 Python 函数 |
+| `RunnableParallel(...)` | 并发执行多个子链 |
+
+```python
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
+
+pipeline = RunnableParallel(
+    raw=RunnablePassthrough(),
+    upper=lambda x: x["text"].upper()
+)
+```
+
+---
+
+## RAG——检索增强生成
+
+RAG 从私有文档中回答问题。
+流程：`加载 → 切分 → 嵌入 → 存储 → 检索 → 生成`
+
+### RAG 的类型
+
+| 类型 | 描述 | 适用场景 |
+|------|-------------|--------------|
+| **普通 RAG** | 对文档切块进行向量相似度搜索。 | 静态文档的通用问答。 |
+| **图 RAG** | 使用知识图谱（实体、关系）。 | 结构化数据（如法律文本、维基）。 |
+| **智能体 RAG** | 由智能体决定*如何*检索（多个检索器、查询重写、网络搜索）。 | 需要推理或兜底的复杂查询。 |
+
+### 实现步骤（普通 RAG）
+
+**1. 加载文档**
+
+```python
+from langchain_community.document_loaders import TextLoader
+loader = TextLoader("data/doc.txt")
+docs = loader.load()
+```
+
+**2. 切分为块**
+
+```python
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+chunks = splitter.split_documents(docs)
+```
+
+**3. 嵌入并存储**
+
+```python
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+vectorstore = Chroma.from_documents(chunks, embeddings, persist_directory="./chroma_db")
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+```
+
+**4. 构建 RAG 链**（接受字符串输入以便于流式处理）
+
+```python
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
+
+model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+def format_docs(docs):
+    return "\n\n".join(d.page_content for d in docs)
+
+rag_prompt = ChatPromptTemplate.from_template("""
+Context: {context}
+Question: {question}
+Answer:
+""")
+
+# 该链现在接受纯字符串作为输入（即问题）
+rag_chain = (
+    {"context": retriever | format_docs, "question": lambda x: x}
+    | rag_prompt
+    | model
+    | StrOutputParser()
+)
+
+answer = rag_chain.invoke("What is the loan period?")
+```
+
+### 调优指南
+
+| 参数 | 推荐值 | 权衡 |
+|-----------|-------------|------------|
+| `chunk_size` | 400–800 token | 更大 = 更多上下文但更多噪声 |
+| `chunk_overlap` | chunk 大小的 10–20% | 防止句子被截断 |
+| `k` | 3–5 | 更多块 = 更多多样性，但有分心风险 |
+
+> **注意：** `RecursiveCharacterTextSplitter` 按字符而非 token 计数。请相应调整 `chunk_size`（例如 500–1000 字符约对应 400–800 token）。
+
+---
+
+## 记忆与状态管理
+
+记忆用于在多轮对话间保留历史。没有记忆时，LLM API 是无状态的。
+
+### LangChain 记忆的关键优势
+
+- **自动化上下文管理**——LangChain 自动格式化并将历史注入提示词；无需手动拼接。
+- **Token 优化**——使用 `ConversationSummaryMemory` 或 `ConversationBufferWindowMemory` 来裁剪/压缩历史，从而节省成本。
+- **持久化状态存储**——将记忆挂载到外部数据库（Redis、PostgreSQL、向量数据库），实现跨会话回溯。
+- **实体抽取**——抽取并记住特定事实（例如“用户名是 Alice”），而非原始日志。
+
+### 与直接调用 API 的对比
+
+| 方面 | 直接调用 LLM API | 使用记忆的 LangChain |
+|--------|----------------|----------------------|
+| 状态管理 | 手动拼接历史 | 自动注入 |
+| Token 用量 | 每次都携带完整历史 | 窗口/摘要压缩 |
+| 会话处理 | 自行实现 | 内置 `RunnableWithMessageHistory` |
+| 持久化 | 无 | 可插拔（Redis、数据库等） |
+
+### 示例（缓冲记忆）
+
+```python
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_openai import ChatOpenAI
+
+# 定义模型
+model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+# 带有 MessagesPlaceholder 占位历史记录的提示词
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant."),
+    MessagesPlaceholder(variable_name="history"),
+    ("human", "{input}")
+])
+
+chain = prompt | model | StrOutputParser()
+
+# 内存中的会话存储
+store = {}
+
+def get_session_history(session_id: str):
+    if session_id not in store:
+        store[session_id] = InMemoryChatMessageHistory()
+    return store[session_id]
+
+# 用历史记录管理包装该链
+chain_with_history = RunnableWithMessageHistory(
+    chain,
+    get_session_history,
+    input_messages_key="input",
+    history_messages_key="history"
+)
+
+response = chain_with_history.invoke(
+    {"input": "My name is Alice"},
+    config={"configurable": {"session_id": "user1"}}
+)
+
+response2 = chain_with_history.invoke(
+    {"input": "What's my name?"},
+    config={"configurable": {"session_id": "user1"}}
+)
+```
+
+---
+
+## 工具与智能体
+
+工具是 LLM 可以调用的函数。智能体决定何时以及如何调用它们。
+
+### 定义工具
+
+```python
+from langchain_core.tools import tool
+
+@tool
+def search_catalog(title: str) -> str:
+    """Search for a book by title."""
+    return f"{title} found on shelf A12."
+```
+
+### 创建智能体
+
+```python
+from langgraph.prebuilt import create_react_agent
+
+# 假设 `model` 已定义（例如 ChatOpenAI）
+agent = create_react_agent(
+    model=model,
+    tools=[search_catalog],
+    state_modifier="You are a library assistant. Use the search tool when needed."
+)
+
+result = agent.invoke({"messages": [("user", "Where is Dune?")]})
+print(result["messages"][-1].content)
+```
+
+**智能体循环：** 推理 → 行动 → 观察 → 回答（必要时重复）。
+
+---
+
+## LangGraph——复杂工作流
+
+LangGraph 处理循环、条件分支和多智能体协调。
+
+### 简单状态图
+
+```python
+from langgraph.graph import StateGraph, END
+from typing import TypedDict
+
+class State(TypedDict):
+    question: str
+    answer: str
+
+def route(state):
+    if "book" in state["question"].lower():
+        return {"answer": "I can help with books."}
+    return {"answer": "I only answer book questions."}
+
+graph = StateGraph(State)
+graph.add_node("router", route)
+graph.set_entry_point("router")
+graph.add_edge("router", END)
+app = graph.compile()
+```
+
+### Supervisor-Workers（多智能体）
+
+```python
+# 需要：uv add langgraph-supervisor
+from langgraph_supervisor import create_supervisor
+from langgraph.prebuilt import create_react_agent
+
+book_agent = create_react_agent(model, [search_catalog], name="book_helper")
+hours_agent = create_react_agent(model, [], name="hours_helper")
+
+supervisor = create_supervisor(
+    agents=[book_agent, hours_agent],
+    model=model,
+    prompt="Route book questions to book_helper, hours to hours_helper."
+)
+```
+
+---
+
+## LangSmith——追踪与调试
+
+LangSmith 记录每一次执行步骤。
+
+```python
+import os
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_API_KEY"] = "lsv2_..."
+os.environ["LANGCHAIN_PROJECT"] = "my_project"
+```
+
+完成设置后，每次 `.invoke()` 都会被自动追踪。在 [smith.langchain.com](https://smith.langchain.com) 查看。
+
+---
+
+## 最佳实践与常见陷阱
+
+### 安全规则
+
+1. 工具调用和路由时设置 `temperature=0`。
+2. 设置 `recursion_limit=10` 以防止无限循环。
+3. 切勿使用 f-string 从用户输入构建提示词（存在注入风险）。
+4. 检索器中始终限定 `k`：`search_kwargs={"k": 3}`。
+
+### 常见问题
+
+| 问题 | 原因 | 解决方法 |
+|---------|-------|-----|
+| `invoke` 返回 `AIMessage` | 缺少输出解析器 | 添加 `\| StrOutputParser()` |
+| **记忆不生效** | **历史键不匹配或缺失** | **使 `history_messages_key` 与你的 `MessagesPlaceholder(variable_name="...")` 匹配** |
+| 智能体无限循环 | 没有迭代上限 | 设置 `recursion_limit` |
+| Token 用量过高 | `chunk_size` 过大 | 减小至 400–600 |
+
+### 生产质量门禁
+
+```python
+llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=2, timeout=15)
+chain.batch(inputs, config={"max_concurrency": 5})
+```
+
+---
+
+## 将 LangChain 作为 API 端点提供服务
+
+**LangChain 的输出可以作为 REST API 端点提供服务。** 用 FastAPI 包装任意链/智能体。
+
+### 输出格式
+
+| 输出类型 | 方法 | 用途 |
+|-------------|--------|----------|
+| 纯文本 | `StrOutputParser()` | 简单问答 |
+| JSON | `JsonOutputParser()` | 结构化数据 |
+| 流式块 | `.stream()` + `StreamingResponse` | 实时 UI |
+| 原始文档 | `retriever.invoke()` | 搜索端点 |
+
+### 示例：FastAPI RAG 端点
+
+```python
+from fastapi import FastAPI, Query
+from fastapi.responses import StreamingResponse
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_chroma import Chroma
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+
+# ----- 加载并为文档建立索引 -----
+loader = TextLoader("langchain_guide.txt")
+docs = loader.load()
+splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+chunks = splitter.split_documents(docs)
+
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+vectorstore = Chroma.from_documents(chunks, embeddings)
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+def format_docs(docs):
+    return "\n\n".join(d.page_content for d in docs)
+
+prompt = ChatPromptTemplate.from_template("""
+Context: {context}
+Question: {question}
+Answer:
+""")
+model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+# 接受纯字符串作为输入的链
+rag_chain = (
+    {"context": retriever | format_docs, "question": lambda x: x}
+    | prompt
+    | model
+    | StrOutputParser()
+)
+
+# ----- FastAPI 应用 -----
+app = FastAPI()
+
+@app.get("/ask")
+async def ask(question: str = Query(...)):
+    return {"answer": rag_chain.invoke(question)}
+
+@app.get("/ask/stream")
+async def ask_stream(question: str):
+    async def generate():
+        async for chunk in rag_chain.astream(question):
+            yield chunk
+    return StreamingResponse(generate(), media_type="text/plain")
+```
+
+运行：`uv run uvicorn api:app --reload --port 8000`
+测试：`curl "http://localhost:8000/ask?question=What%20is%20LCEL?"`
+
+### 部署注意事项
+
+- 生产环境请将本地 Chroma 替换为持久化向量存储（PGVector、Pinecone）。
+- 为公开 API 添加认证和速率限制。
+- 可部署到 Render、Railway、Fly.io 或 VPS。
+
+---

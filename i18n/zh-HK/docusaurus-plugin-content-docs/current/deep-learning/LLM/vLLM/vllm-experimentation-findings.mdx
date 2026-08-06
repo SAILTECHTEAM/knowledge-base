@@ -1,0 +1,250 @@
+---
+sidebar_position: 4
+title: vLLM 實驗與發現
+description: 單卡 RTX 2080 Ti 上 vLLM AWQ 4B 測試的基準工作流、日誌、指標與發現。
+---
+
+# vLLM 實驗與發現
+
+本頁記錄單卡 RTX 2080 Ti vLLM 測試的基準工作流、日誌、結果與解釋。LLM 推論理論見 [LLM 推論原理](../llm-inference-principles)，服務部署見 [vLLM 部署設定](./vllm-setup)。
+
+## 測試範圍
+
+| 項目 | 取值 |
+| :--- | :--- |
+| GPU | NVIDIA GeForce RTX 2080 Ti |
+| VRAM | 約 11 GB |
+| 服務框架 | vLLM |
+| 模型 | `QuantTrio/Qwen3.5-4B-AWQ` |
+| 基座模型 | `Qwen/Qwen3.5-4B` |
+| 基準資料 | `vllm bench serve --dataset-name random` |
+| 基準指令族 | 針對 OpenAI 相容 chat 端點的 `vllm bench serve` |
+| 標準提示詞數 | `--num-prompts 200` |
+| 種子 | `--seed 0` |
+| 輸出長度 | `--random-output-len 128` |
+| vLLM dtype | `float16` |
+
+:::caution[範圍]
+這些是合成隨機提示詞的基礎設施基準結果。它們展示的是受控輸入／輸出長度下的服務行為，而非產品品質或生產就緒度。
+:::
+
+:::note[為何使用 `float16`]
+測試使用 `--dtype float16`，因為 RTX 2080 Ti 是 Turing 架構 GPU，算力為 7.5。該硬體路徑不像較新的資料中心 GPU 那樣可以假定支援 `bfloat16`，因此 `float16` 是該基準設定中更穩妥的顯式 dtype。
+:::
+
+## 對比中使用的指標
+
+| 指標 | 含義 | 在對比中如何使用 |
+| :--- | :--- | :--- |
+| 平均 TTFT | 首 token 平均時間。 | prefill 與排隊成本的主要訊號。 |
+| P99 TTFT | 接近尾部的首 token 時間。 | 用於暴露遷移到 `n=200` 後的排隊或排程尖峰。 |
+| 平均 TPOT | 生成開始後每個輸出 token 的平均時間。 | 單請求 decode 速度的主要訊號。 |
+| P99 TPOT | 接近尾部的每輸出 token 時間。 | 用於檢查在更重活躍負載下 decode 延遲是否變得不穩定。 |
+| 輸出 tokens/s | 基準牆鐘時間內的聚合生成 token 吞吐量。 | 與 TTFT 和 TPOT 對比，以展示吞吐量／延遲權衡。 |
+
+有一點很關鍵：輸出 tokens/s 並非僅 decode 速度。它是一種聚合基準吞吐量，包含花在 prefill、排隊和 decode 上的時間。這就是為什麼長提示詞即便在 TPOT 僅溫和上升時，也可能降低輸出 tokens/s。
+
+## 基準工作流
+
+每次執行的變數讓結果目錄和基準檔案自解釋：
+
+```bash
+export MAX_MODEL_LEN="<server-context-window-tokens>"
+export MAX_NUM_SEQS="<maximum-active-sequences>"
+export MAX_NUM_BATCHED_TOKENS="<maximum-scheduled-tokens-per-step>"
+export RANDOM_INPUT_LEN="<benchmark-input-tokens>"
+export RANDOM_OUTPUT_LEN="<benchmark-output-tokens>"
+export MAX_CONCURRENCY="<benchmark-client-concurrency>"
+export GPU_MEMORY_UTILIZATION="<gpu-memory-fraction-for-vllm>"
+export NUM_PROMPTS="<number-of-benchmark-requests>"
+export SEED="<random-dataset-seed>"
+
+export RUN_CONFIG_ID="<descriptive-run-config-id>"
+export RUN_ID="<descriptive-run-config-id>-<timestamp>"
+export RESULT_DIR="$WORKDIR/results/$RUN_ID"
+export BENCH_FILE="$RESULT_DIR/bench-<descriptive-run-config-id>.txt"
+mkdir -p "$RESULT_DIR"
+```
+
+基準在 vLLM 容器內執行，針對 OpenAI 相容的 chat 端點。
+
+```bash
+docker exec "$CONTAINER" vllm bench serve \
+  --backend openai-chat \
+  --endpoint /v1/chat/completions \
+  --model "$MODEL" \
+  --dataset-name random \
+  --random-input-len "$RANDOM_INPUT_LEN" \
+  --random-output-len "$RANDOM_OUTPUT_LEN" \
+  --num-prompts "$NUM_PROMPTS" \
+  --max-concurrency "$MAX_CONCURRENCY" \
+  --seed "$SEED" \
+  --ignore-eos \
+  --save-result \
+  --save-detailed \
+  --result-dir "$RESULT_DIR" \
+  --result-filename "bench-detailed.json" \
+  | tee "$BENCH_FILE"
+```
+
+之所以使用合成隨機提示詞，是因為它們避免暴露敏感資料。它們還讓輸入和輸出長度可控，因此 `i1024/o128/c1` 在各次執行間意味著相同的基本負載形態。局限在於隨機提示詞不能代表自然語言品質、使用者行為或應用層面的答案有用性。
+
+:::note[基準指令說明]
+`--ignore-eos` 告訴基準工具忽略早出的結束序列 token，使輸出更接近請求的 `--random-output-len`。這讓各次執行間的 TPOT 和輸出吞吐量對比更乾淨。它是一個基準控制選項，不一定是生產服務策略。
+
+`tee "$BENCH_FILE"` 把基準輸出既列印到終端，又把同樣的輸出寫入基準文字檔案。這讓互動式執行保持可讀，同時為後續報告保留一份副本。
+:::
+
+## 產物擷取
+
+每次執行後擷取證據：
+
+```bash
+docker image inspect "$IMAGE" \
+  --format '{{index .RepoDigests 0}}' \
+  > "$RESULT_DIR/image-digest.txt"
+nvidia-smi -q > "$RESULT_DIR/nvidia-smi-final.txt"
+docker logs "$CONTAINER" > "$RESULT_DIR/server.log" 2>&1
+docker inspect "$CONTAINER" > "$RESULT_DIR/container-config.json"
+```
+
+`image-digest.txt` 記錄本次執行所用的精確 Docker 映像身份。這很重要，因為諸如 `latest` 的標籤會在不同基準工作階段間移動。
+`2>&1` 確保正常日誌和錯誤訊息都被儲存到同一個檔案。沒有它，任何應用崩潰或錯誤訊息會完全繞過你的日誌檔案，轉而列印到螢幕上。
+
+可用 `grep` 從長日誌中提取相關行。例如：
+
+```bash
+grep -iE "kv cache|maximum concurrency|memory|gpu|oom|error" "$RESULT_DIR/server.log"
+```
+
+說明：
+
+- `grep` 搜尋文字檔案。
+- `-i` 使搜尋不區分大小寫。
+- `-E` 啟用延伸正則表示式。
+- `|` 字元表示「或」，因此該範例查找包含任一關鍵字的行。
+
+## 重複工作流
+
+基準實驗使用如下循環：
+
+```text
+設定目前伺服器端限制。
+啟動 vLLM 容器。
+擷取啟動證據和 metrics-before。
+在取樣指標的同時執行基準。
+擷取基準輸出、伺服器日誌、容器設定、GPU 狀態和映像摘要。
+停止並移除容器。
+按需變更伺服器端限制。
+啟動全新容器並再次基準測試。
+```
+
+擷取產物後停止並移除容器：
+
+```bash
+docker stop "$CONTAINER"
+docker rm "$CONTAINER"
+```
+
+這很重要，因為 `--max-model-len`、`--max-num-seqs`、`--max-num-batched-tokens` 和 `--gpu-memory-utilization` 是伺服器啟動選擇。變更這些值需要一個全新的 vLLM 伺服器行程。僅基準相關的值（如 `--random-input-len`、`--random-output-len` 和 `--max-concurrency`）只有在已執行伺服器對新形態有足夠容量時，才能在基準指令之間變更。
+
+## 理論觀察
+
+| 服務元件 | 理論壓力 | 指標中的預期 |
+| :--- | :--- | :--- |
+| Prefill | 注意力分數分量隨提示詞長度 $N$ 按 $O(N^2)$ 縮放，而其他每 token 工作更接近 $O(N)$。 | TTFT 應隨輸入長度強烈上升。實測比率仍可能低於純 $N^2$ 比率，因為 TTFT 是若干成本之和。 |
+| Decode 注意力 | 每個新 token 在現有快取上下文上做注意力，因此每個生成 token 的注意力工作隨當前上下文長度按 $O(N)$ 縮放。 | 隨上下文增長，TPOT 的上升應比 TTFT 溫和得多。 |
+
+## 程式碼與日誌
+
+實驗使用三條標準階梯外加一條診斷：
+
+| 實驗 | 改變了什麼 | 為何測試 |
+| :--- | :--- | :--- |
+| 輸入長度 | `i128`、`i512`、`i1024`、`i1800`。 | 在 2048 上下文限制下度量 prefill 增長。 |
+| 上下文限制 | 4096、8192、16384 最大上下文。 | 在單卡上對逐步更大的服務形態進行極限測試。 |
+| 並發 | 基準並發 1、2、4、8。 | 度量批次處理與排隊。 |
+
+### 輸入長度階梯
+
+以下所有執行使用 `--max-model-len 2048`、`--max-num-seqs 1`、`--max-num-batched-tokens 2048`、`--gpu-memory-utilization 0.82`、`--num-prompts 200` 和 `--seed 0`。
+
+| 輸入 | 輸出 | 輸出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128 | 128 | 76.89 | 104.68 ms | 104.65 ms | 12.28 ms | 12.52 ms |
+| 512 | 128 | 70.80 | 229.99 ms | 263.46 ms | 12.42 ms | 13.15 ms |
+| 1024 | 128 | 61.93 | 444.17 ms | 456.24 ms | 12.77 ms | 12.93 ms |
+| 1800 | 128 | 52.49 | 792.38 ms | 822.95 ms | 12.96 ms | 13.17 ms |
+
+觀察到的縮放：
+
+| 變化 | 輸入比率 | 純 $O(N^2)$ 注意力比率 | 平均 TTFT 比率 | 平均 TPOT 比率 |
+| :--- | ---: | ---: | ---: | ---: |
+| `128 -> 512` | 4.00x | 16.00x | 2.20x | 1.01x |
+| `512 -> 1024` | 2.00x | 4.00x | 1.93x | 1.03x |
+| `1024 -> 1800` | 1.76x | 3.09x | 1.78x | 1.01x |
+| `128 -> 1800` | 14.06x | 197.75x | 7.57x | 1.06x |
+
+方向與預期的 prefill 成本模式一致：更長的提示詞主要損害 TTFT，因為 prefill 必須處理整個提示詞並在第一個輸出 token 出現前寫入 KV cache。確切的曲線在該範圍內並非二次。例如，自注意力只是 transformer 層的一部分；模型在注意力前後還做每 token 變換，而這些部分更接近 $O(N)$ 而非 $O(N^2)$。這是實測 TTFT 強烈增長但仍低於純二次注意力比率的一個可能原因。
+
+### 上下文限制階梯
+
+上下文限制階梯評估長上下文部署的營運極限，而非孤立的輸入縮放。因此結果應被讀作一次執行包絡測試：當 vLLM 被要求在單卡上支援更大上下文視窗時，服務設定變得多麼昂貴？
+
+16384 上下文形態在 `--gpu-memory-utilization 0.82` 下於引擎啟動期間失敗。錯誤發生在 vLLM 初始化 KV-cache 容量時。為服務一個完整的 16384-token 請求，vLLM 估算需要 0.56 GiB 的 KV-cache 記憶體，但在模型載入、效能分析、CUDA graph 記憶體及其他執行時預留之後僅剩 0.23 GiB 可用。在該記憶體預算下，vLLM 估算最大支援的模型長度為 5808 token。將 `gpu-memory-utilization` 提升至 `0.90` 給了 vLLM 更大的預留預算，使 16384 執行得以啟動，代價是可用 VRAM 餘量減少。下方的對比表報告成功的 `gpu-memory-utilization 0.90` 執行；全部使用基準並發 1 和 200 條提示詞。
+
+| 最大上下文 | 輸入 | 輸出 | 輸出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT | VLLM 記憶體 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4096 | 2048 | 128 | 48.26 | 968.22 ms | 984.73 ms | 13.26 ms | 13.49 ms | 8626 MiB |
+| 8192 | 4096 | 128 | 30.96 | 2341.79 ms | 2401.46 ms | 14.11 ms | 14.39 ms | 9136 MiB |
+| 16384 | 8192 | 128 | 15.21 | 6402.78 ms | 6626.26 ms | 15.84 ms | 16.48 ms | 9876 MiB |
+
+觀察到的效果不僅是效能變慢；它表明最大上下文形態已接近該 GPU 的實際極限。隨著服務上下文形態增大，平均 TTFT 從 4096 上下文時的 968.22 ms 升至 16384 上下文時的 6402.78 ms，而輸出吞吐量從 48.26 跌至僅 15.21 輸出 tokens/s。對於一個互動式服務目標而言該吞吐量非常低，尤其因為該執行還要求 `gpu-memory-utilization 0.90`，幾乎沒有留下 VRAM 餘量。平均 TPOT 上升溫和得多，從 13.26 ms 升至 15.84 ms，因為 decode 複用 prefill 期間建立的 KV cache，而不是為每個生成 token 重新計算整個提示詞。實際結論是：16384 上下文是一次極限探測，並非該 RTX 2080 Ti 設定的合理工作點。
+
+VLLM 記憶體欄應被解讀為常駐行程記憶體，而非即時 KV-cache 用量。增大 `--max-model-len` 要求 vLLM 規劃更大的可能 KV-cache 包絡，但所報 MiB 值還包括模型權重、CUDA／執行時工作區、效能分析分配以及記憶池行為。
+
+### 並發階梯
+
+並發階梯使用相同負載形態 `i1024/o128`，同時把基準並發從 1 增加到 8。伺服器以 `--max-num-seqs 8`、`--max-num-batched-tokens 8192`、`--gpu-memory-utilization 0.82` 和 `--num-prompts 200` 啟動，因此對比聚焦於批次處理、排隊和 KV-cache 壓力。
+
+| 基準並發 | 輸出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT | 最大執行 | 最大等待 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 62.67 | 431.37 ms | 447.43 ms | 12.68 ms | 12.84 ms | 1 | 0 |
+| 2 | 97.91 | 638.89 ms | 867.79 ms | 15.55 ms | 17.47 ms | 2 | 0 |
+| 4 | 141.96 | 1326.18 ms | 1693.87 ms | 17.95 ms | 25.76 ms | 4 | 0 |
+| 8 | 140.41 | 4943.71 ms | 9813.48 ms | 17.92 ms | 25.49 ms | 4 | 4 |
+
+改變並發意味著基準同時向伺服器發送多個請求。vLLM 隨後可把來自不同請求的工作批在一起，使 GPU 在每個排程步驟中有更多工作可處理。這就是為什麼即使每個單獨請求變慢，聚合輸出 tokens/s 仍會上升：伺服器在並行地為更多請求產出 token。
+
+代價是每個請求現在要與其他活躍請求共享 GPU 算力、記憶體頻寬、排程器時間和 KV-cache 容量。TTFT 上升，因為請求可能要排在自己的 prefill 完成之前等待其他提示詞。TPOT 也上升，因為每個 decode 步驟不再只服務一個序列；伺服器在更龐大的活躍 batch 中推進，並為多個請求讀取 KV-cache 區塊。
+
+P99 TPOT 值顯示 decode 延遲也變得更不穩定。在 `c1` 時，P99 TPOT 接近平均 TPOT，12.84 ms 對 12.68 ms。在 `c4` 時，P99 TPOT 升至 25.76 ms，而平均 TPOT 為 17.95 ms。這意味著大多數 token 按平均節奏生成，但某些 decode 步驟慢得多。例如，這可能發生在排程器步驟工作不均、活躍請求處於 prefill/decode 的不同階段，或 KV-cache 記憶體流量在批次處理下變得更突發時。
+
+理論上的 KV-cache 記憶體需求隨活躍序列大致線性增長。如果伺服器能讓更多請求保持執行，批次處理可提升 GPU 利用率和聚合輸出 tokens/s。但一旦 GPU 飽和，或 KV-cache 池耗盡，更多客戶端並發主要變成排隊。
+
+觀察到的模式符合該預期：
+
+| 變化 | 輸出 tok/s 變化 | 平均 TTFT 變化 | 排程器訊號 | 解釋 |
+| :--- | :--- | :--- | :--- | :--- |
+| `c1 -> c2` | 62.67 至 97.91 | 431.37 ms 至 638.89 ms | 2 執行，0 等待 | GPU 利用率更好，延遲代價適中。 |
+| `c2 -> c4` | 97.91 至 141.96 | 638.89 ms 至 1326.18 ms | 4 執行，0 等待 | `gpuutil0.82` 下測得的最佳吞吐量，但 TTFT 約翻倍。 |
+| `c4 -> c8` | 141.96 至 140.41 | 1326.18 ms 至 4943.71 ms | 4 執行，4 等待，KV 使用率 100% | 吞吐量飽和；額外請求排隊而非提升有用工作。 |
+
+這也解釋了為何外部記憶體快照可能具有誤導性。vLLM 的 PagedAttention 從啟動時規劃好的記憶池中分配 KV-cache 區塊。因此 `nvidia-smi` 大多報告 vLLM 已預留的常駐記憶體加上瞬時執行時記憶體，而非每個並發層級的精確即時 KV-cache 佔用。vLLM 的內部指標顯示了真實壓力：`c8` 達到 100% GPU KV-cache 使用率並有四個等待請求。
+
+### C8 GPU 記憶體診斷
+
+此診斷僅改變 `--gpu-memory-utilization`：
+
+| GPU 記憶體設定 | 輸出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT | KV cache 大小 | 最大滿上下文並發 | 最大執行 | 最大等待 | KV 使用率峰值 | VLLM 記憶體 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | :--- | ---: |
+| 0.82 | 140.41 | 4943.71 ms | 9813.48 ms | 17.92 ms | 25.49 ms | 7,314 tokens | 3.57x | 4 | 4 | 100% | 8196 MiB |
+| 0.90 | 180.69 | 2800.85 ms | 7940.99 ms | 22.56 ms | 40.78 ms | 21,357 tokens | 10.43x | 8 | 0 | 66.7% | 9820 MiB |
+
+這隔離了 `c8/gpuutil0.82` 排隊結果的原因。在 `0.82` 時，vLLM 僅有 7314 KV-cache token 可用，並報告對 2048-token 請求的最大滿上下文並發為 3.57x。基準希望八個並發請求，所以排程器一次只能執行四個，留下四個等待。在 `0.90` 時，vLLM 規劃了 21,357 KV-cache token，能執行全部八個請求，吞吐量升至 180.69 輸出 tok/s。
+
+診斷還顯示了提高該記憶體設定的代價。相比受限的 `c8/0.82` 執行，TTFT 有所改善，因為等待的請求更少，但 TPOT 從 17.92 ms 惡化到 22.56 ms，P99 TPOT 急劇惡化。伺服器同時做更多活躍 decode 工作，這提升了聚合吞吐量，卻讓單請求 decode 更不穩定。GPU 常駐記憶體也升至 9820 MiB，在這塊 11 GB 的 GPU 上幾乎沒有餘量。
+
+## 參考文獻
+
+- [vLLM benchmark serve CLI](https://docs.vllm.ai/en/latest/cli/bench/serve/)
