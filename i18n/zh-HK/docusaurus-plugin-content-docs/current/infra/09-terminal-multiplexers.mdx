@@ -69,6 +69,29 @@ zellij list-sessions
 | `Ctrl+t` 然後 `x` | 關閉窗格 |
 | `Ctrl+t` 然後 `?` | 切換浮動說明窗格 |
 
+### SSH 代理轉發
+
+Zellij 於工作階段建立時擷取環境變數，此後不再重新整理——重新連線不會重新整理，新建窗格亦不會繼承新值（[zellij#1637](https://github.com/zellij-org/zellij/issues/1637)）。使用 SSH 代理轉發時，重新連線後每個窗格仍指向原連線的 `SSH_AUTH_SOCK` 套接字，導致認證失敗。
+
+解決方法是將 `SSH_AUTH_SOCK` 固定到一個穩定路徑，並在每次登入時把符號連結重新指向目前轉發的套接字。將以下內容加入 `.bashrc`/`.zshrc`。它在每次 SSH 登入時執行；不等判斷可防止 Zellij 內的 shell 把符號連結重新連結到自身：
+
+```bash
+AGENT_SOCK="/run/user/$(id -u)/ssh_auth.sock"
+if [ -n "${SSH_AUTH_SOCK}" ] && [ "${SSH_AUTH_SOCK}" != "${AGENT_SOCK}" ]; then
+  ln -sfn "${SSH_AUTH_SOCK}" "${AGENT_SOCK}"
+fi
+export SSH_AUTH_SOCK="${AGENT_SOCK}"
+```
+
+每個窗格持有固定路徑。每次重新連線都會重新指向符號連結，所有窗格——包括重新連線前啟動的 shell——在下一次 `ssh`/`git` 呼叫時即恢復運作，無需重新啟動窗格。
+
+- 最後一次登入生效：符號連結是全域的，並發 SSH 連線共享同一個代理套接字。
+- 斷線與重新連線之間，該路徑解析為失效套接字——轉發的代理隨 SSH 工作階段終止。
+
+:::note[推廣到更多變數]
+符號連結方式只重新整理一個變數。當更多變數會失效時（`DISPLAY`、`WAYLAND_DISPLAY` 等），可在 attach 前用 `declare -p` 把環境匯出到檔案，並在窗格內 shell 的 `precmd` 鉤子中偵測檔案 mtime 變化後重新 source。完整實作見 [zellij#1637](https://github.com/zellij-org/zellij/issues/1637)。
+:::
+
 ### CLI 用法
 
 Zellij 可完全透過命令列與 shell 腳本驅動，包括控制主機上其他位置執行的工作階段。這是無頭工作流、CI 流水線與工作區自動化的基礎。

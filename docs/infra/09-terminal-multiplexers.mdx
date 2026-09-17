@@ -69,6 +69,29 @@ zellij list-sessions
 | `Ctrl+t` then `x` | Close pane |
 | `Ctrl+t` then `?` | Toggle floating help pane |
 
+### SSH Agent Forwarding
+
+Zellij captures the environment at session creation and never refreshes it — not on reattach, and not for newly created panes ([zellij#1637](https://github.com/zellij-org/zellij/issues/1637)). With SSH agent forwarding, every pane keeps pointing at the `SSH_AUTH_SOCK` socket of the original connection after a reconnect, and authentication fails.
+
+Work around this by pinning `SSH_AUTH_SOCK` to a stable path and re-pointing it to the forwarded socket on each login. Add the following to `.bashrc`/`.zshrc`. It runs on each fresh SSH login; the inequality guard prevents shells inside Zellij from re-linking the symlink to itself:
+
+```bash
+AGENT_SOCK="/run/user/$(id -u)/ssh_auth.sock"
+if [ -n "${SSH_AUTH_SOCK}" ] && [ "${SSH_AUTH_SOCK}" != "${AGENT_SOCK}" ]; then
+  ln -sfn "${SSH_AUTH_SOCK}" "${AGENT_SOCK}"
+fi
+export SSH_AUTH_SOCK="${AGENT_SOCK}"
+```
+
+Every pane holds the fixed path. Each reconnect re-points the symlink, and all panes — including shells started before the reconnect — recover at the next `ssh`/`git` invocation, with no pane restart.
+
+- The most recent login wins: the symlink is global, so concurrent SSH connections share one agent socket.
+- Between disconnect and reconnect, the path resolves to a dead socket — the forwarded agent is terminated with the SSH session.
+
+:::note[Generalization]
+The symlink approach refreshes one variable. When additional variables go stale (`DISPLAY`, `WAYLAND_DISPLAY`, ...), dump the environment to a file with `declare -p` before attaching and re-source it from a shell `precmd` hook inside panes when the file's mtime changes. See [zellij#1637](https://github.com/zellij-org/zellij/issues/1637) for a complete implementation.
+:::
+
 ### CLI Usage
 
 Zellij can be driven entirely from the command line and shell scripts, including controlling sessions running elsewhere on the host. This is the foundation for headless workflows, CI pipelines, and workspace automation.
