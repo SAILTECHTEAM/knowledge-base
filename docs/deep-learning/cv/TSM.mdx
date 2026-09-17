@@ -1,105 +1,108 @@
 ---
 title: TSM
 sidebar_position: 1
+description: Temporal Shift Module, a zero-parameter temporal modeling method that gives 2D CNNs video understanding ability.
 ---
 
- 🧩🧩🧩
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image1.png)
+# Temporal Shift Module (TSM)
 
-Compared with 2D CNNs, which can only extract spatial features from a single frame, 3D CNNs can model spatial and temporal information simultaneously in video understanding tasks, so they can extract more complex spatiotemporal features. 
+**Paper:** Ji Lin, Chuang Gan, Song Han, TSM: Temporal Shift Module for Efficient Video Understanding, ICCV 2019.
 
-**3D convolution diagram**🧩🧩🧩
+**Paper link:** https://openaccess.thecvf.com/content_ICCV_2019/papers/Lin_TSM_Temporal_Shift_Module_for_Efficient_Video_Understanding_ICCV_2019_paper.pdf
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image2.png)
+**Code:** https://github.com/mit-han-lab/temporal-shift-module
 
-**2D convolution diagram**🧩🧩🧩
+![TSM overview: shift part of the channels in time, then apply 2D convolution](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image1.png)
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image3.png)
+Compared with 2D CNNs, which extract spatial features from one frame at a time, 3D CNNs model space and time together and capture richer spatiotemporal structure.
 
-However, 3D convolution requires additional computation along the temporal dimension, which significantly increases the amount of computation and the number of parameters. This makes it difficult to apply in real-time or resource-constrained scenarios.
-Therefore, a key question is:
-> Can temporal modeling ability be introduced while preserving the efficient computation of 2D CNNs?
+**3D convolution**
 
-##  Solution
-	
-###  TSM proposes a lightweight mixing method.
-As shown below, the feature has four dimensions, where C is the channel dimension and T is the temporal dimension.
-🧩🧩🧩
+![3D convolution over space and time](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image2.png)
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image4.png)
+**2D convolution**
 
-- The core operation of TSM is to shift part of the channels along the temporal dimension (including forward and backward shifts). This lets the machine use standard 2D convolution for batch-parallel processing, improving computational efficiency.
- 
-###  The role of Shift:
-Taking diagram b as an example, orange indicates t=0. After shift, the features of the current frame will come from t-1 and t+1 (the paper only shifts by 1). In the figure above, b and c represent the offline and online shift methods respectively. 
-- (b) Offline shift is bidirectional, so the current time point can see future information.
-- (c) The online TSM model cannot obtain channel information from future frames, so it uses a one-way operation. We only need to change the address of the data, so this operation does not require any increase in FLOPs or parameters.
+![2D convolution over a single frame](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image3.png)
 
-###  Core idea:
-**Original purpose of 3D:** turn it into 2D to reduce computation.
-- Shift first, then convolve. Therefore, after convolution on the t row in c, part of the obtained channels are shifted to t-1 (and also t+1 in offline mode).
-- As for which channel is more important, let the machine learn it by itself, because we do not know which channel is more important temporally.
-🧩🧩🧩
+3D convolution adds computation along the temporal dimension, which raises cost and parameter count and makes deployment difficult in real-time or resource-limited settings. The central question is therefore:
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image5.png)
+> Can temporal modeling be added while keeping the efficiency of 2D CNNs?
 
-- Now batch-parallel processing can be performed along the temporal dimension. Because it has become 2D convolution, we use shift to splice the temporal dimension, and the following convolution performs fusion.
+## Solution
 
-##  Temporal Shift Module Method
- 🧩🧩🧩
+### TSM Shifts Part of the Channels in Time
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image6.png)
+The feature has four dimensions, where $C$ is the channel dimension and $T$ is the temporal dimension.
 
-### 
- - Figure a shows latency overhead. As shown, from the origin where TSM is not used (2D CNN), to 1 where all channels are shifted (an extreme case), the more channels are shifted, the more latency overhead TSM introduces. Therefore, the paper uses a 1/4 shift.
-*(It seems that the default TSM setting is offline.)*
-- Figure b compares accuracy. The green line indicates direct shift, and the blue line indicates residual-structure shift. The blue line performs best because the residual preserves the original information and does not destroy spatial features. The figure also shows that more shift is not always better and may instead cause accuracy to drop.
-###  Model design: Residual TSM and In-Place TSM 
-🧩🧩🧩
+![Channel shift along the temporal dimension](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image4.png)
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image7.png)
+The core operation shifts a fraction of the channels forward and backward along time. After the shift, each frame carries some channels from its neighbors, so a plain 2D convolution applied afterwards mixes temporal information while the computation itself stays two-dimensional.
 
-**(a) The residual connection is applied only after shift**
-Although shift does not add any parameters or FLOPs, if Shift is placed directly before the Residual Connection (a), part of the current frame's features will be moved to neighboring frames, causing the current frame to no longer access the information that has been moved away. This weakens the 2D CNN's original ability to understand the current image, thereby affecting detection accuracy.
-Especially when a large number of channels are shifted, the information stored in the shifted channels of the current frame will be lost. Therefore, although the model obtains temporal information, its ability to understand the current image decreases, which affects the final recognition result.
-**(b) Residual TSM can be understood as**:
-While adding temporal information, it also fully preserves the original information. In this way, even if some features are moved to previous or later frames, the model can still see the complete content of the current frame through the residual connection, so it will not affect recognition like In-Place TSM does when information is moved away.
+### The Role of the Shift
 
- 
-###  Offline TSM video models 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image8.png)
+![Offline bidirectional shift versus online unidirectional shift](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image5.png)
 
-The biggest difference between **Offline TSM** and **Online TSM** is:
-During offline inference, the whole video has already been recorded, so the model can see future information in advance. During online inference, future frames have not yet been generated, so future information cannot be used.
-- The paper uses this point in Offline TSM by shifting part of the channels forward and part of the channels backward, thereby implementing bidirectional temporal information exchange.
-> However, the paper's results seem to suggest that the effect is better when temporal frames that have **not yet happened** are not shifted in.
+Taking panel (b) as an example, the current frame gathers shifted channels from frame $t-1$ and frame $t+1$. The paper shifts by one frame in each direction.
 
-- In the figure, video sampling is first performed on the blue Video on the left to obtain Frames. Then the first 2D Conv in the connected figure is an ordinary ResNet convolution layer used to extract spatial features (such as human contours and clothing textures), not temporal features. After shift, the current Feature may simultaneously contain information from past frames, the current frame, and future frames. But because shift itself does not learn anything, the later 2D convolution is used to fuse this temporal information.
-###  Online temporal shift extension proposed based on base TSM (offline)
+- Panel (b), offline shift, is bidirectional. The current frame can use past and future information because the whole video is already available.
+- Panel (c), online shift, is unidirectional. Future frames do not exist yet, so channels move only from the past to the present. The operation changes only data addresses, so it adds no FLOPs and no parameters.
 
-Online temporal shift cannot obtain future frames of the video, so it is uni-directional.
-  🧩🧩🧩
+### Core Idea
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image9.png)
+Shift first, then convolve. After the shift, the 2D convolution fuses the mixed channels. Which channels matter most in time is left for the network to learn, since the answer varies across layers and tasks.
 
-The figure above shows the unidirectional TSM process used online. First, for each frame and each residual block, the first 1/8 of the feature maps are saved and cached in memory. Then, for the next frame, the first 1/8 of the current feature maps are replaced with the cached feature maps. Finally, 7/8 current feature maps and 1/8 old feature maps are combined to generate the next layer. Using unidirectional TSM for online video recognition provides the following advantages: 
-- Low-latency inference: for each frame, we only need to replace and cache 1/8 of the features, without any extra computation. Therefore, the latency of each-frame prediction is almost the same as the 2D CNN baseline model.
-- Low memory usage: because ResNet-50 caches only a small part of the features in memory, memory usage is very low. For example, ResNet-50 only adds a 0.9 MB cache to store intermediate features.
-- Multi-level temporal fusion: TSM supports temporal fusion at all levels.
+Batch-parallel processing along time becomes possible because the heavy operation remains 2D convolution. The shift supplies the temporal mixing, and the following convolution performs the fusion.
 
-In online TSM, we can only access the current frame and past frames. Therefore, TSM adopts a unidirectional temporal information transfer method. When processing the current F<sub>t</sub>, the model takes a part of the features from the previous frame (for example, 1/8 of the channels) and caches them in memory. Then, when processing the next frame F<sub>t+1</sub>, it replaces part of the current frame's features with this cached feature, thereby implementing cross-time information transfer. The whole process requires no extra computation and only moves data, so it almost does not increase computational overhead. At the same time, because most features still come from the current frame (such as 7/8), the model can still maintain good spatial modeling ability. This method allows TSM to keep the computational complexity of 2D CNN while achieving temporal modeling ability similar to 3D CNN, and it is especially suitable for low-latency real-time tasks such as autonomous driving or video surveillance.
-PS. The source of 1/8 here refers to the earlier offline result where shift=1/4 works best.
+## Shift Proportion and Placement
+
+![Latency overhead and accuracy for different shift proportions](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image6.png)
+
+Panel (a) reports latency overhead from data movement. Shifting all channels adds up to about 13.7 percent overhead on CPU, which is not negligible. Shifting a small fraction such as 1/8 limits the overhead to around 3 percent. The paper therefore shifts only part of the channels.
+
+Panel (b) compares accuracy. Residual shift consistently outperforms in-place shift. Accuracy first rises with more shifted channels because temporal reasoning improves, then falls because spatial modeling of the current frame suffers. The peak for residual shift is at one quarter of the channels.
+
+:::tip[Default setting]
+The paper uses residual shift of 1/4 of the channels as the default: 1/8 forward and 1/8 backward for offline bidirectional modeling.
+:::
+
+### Model Design: Residual TSM and In-Place TSM
+
+![In-place shift before the residual block versus shift inside the residual branch](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image7.png)
+
+In-place shift inserts the operation before a convolution layer or residual block. Shifted channels leave the current frame, so the current frame loses the information those channels carried. When many channels move, the backbone's ability to represent the present image degrades.
+
+Residual shift places the operation inside the residual branch. The identity path still carries the complete current-frame activation, so temporal information is added without removing the original content. Even when all branch channels shift, the shortcut preserves spatial capacity, which is why residual shift beats in-place shift at every proportion in the paper's Kinetics comparison.
+
+## Offline TSM Video Models
+
+![Offline TSM video model with bidirectional temporal exchange](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image8.png)
+
+Offline inference sees the whole recorded video, so future frames are available. The model shifts part of the channels forward and part backward, which implements bidirectional exchange across time. Video sampling produces frames, an early ordinary ResNet convolution extracts spatial structure, and later 2D convolutions fuse the shifted mixture. Since the shift itself has no parameters, all learning happens in the convolutions that follow it.
+
+## Online Temporal Shift
+
+Online inference cannot use future frames, so the shift is unidirectional.
+
+![Unidirectional TSM pipeline for online recognition with a feature cache](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image9.png)
+
+![Detail of the online shift: cached past channels replace part of the current frame](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image10.png)
+
+For each frame and each residual block, the first 1/8 of the feature maps are saved in memory. When the next frame arrives, its first 1/8 is replaced by the cached maps. The layer therefore processes 7/8 of the present frame together with 1/8 from the past. This design has three practical effects:
+
+- Low-latency inference: each frame needs only a small replace-and-cache step, so per-frame latency stays close to the 2D baseline.
+- Low memory usage: only a small fraction of features is cached (the paper reports about 0.9 MB extra for ResNet-50).
+- Multi-level temporal fusion: the same operation repeats at every stage, so temporal mixing happens throughout the network.
+
+The 1/8 figure follows directly from the offline result. Offline bidirectional shift uses 1/4 in total:
+
+```text
+Offline bidirectional TSM: 1/4 total = 1/8 forward + 1/8 backward
+Online unidirectional TSM: 1/8 total = past frames only
 ```
-Offline (bidirectional) TSM: total shift = 1/4
-= 1/8 forward + 1/8 backward
 
-Online (unidirectional) TSM: only shift = 1/8
-= only uses past frames
-```
-🧩🧩🧩
+![Accuracy and computation trade-off of TSM against 3D baselines](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image11.png)
 
-![TSM architecture diagram](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image11.png)
+## References
 
-
-
-
+- Ji Lin et al., TSM: Temporal Shift Module for Efficient Video Understanding, ICCV 2019.
+- Reference implementation: https://github.com/mit-han-lab/temporal-shift-module
