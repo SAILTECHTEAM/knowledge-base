@@ -42,3 +42,14 @@
 /* .katex-mathml {
   display: none;
 } */
+
+/* Wide comparison tables: keep natural column widths and scroll
+   horizontally instead of squeezing columns into the article width. */
+.wide-table {
+  overflow-x: auto;
+  margin-bottom: var(--ifm-paragraph-margin-bottom);
+}
+
+.wide-table table {
+  min-width: 1200px;
+}

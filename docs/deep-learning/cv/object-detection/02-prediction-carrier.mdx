@@ -1,0 +1,170 @@
+---
+sidebar_position: 3
+title: "Deconstructing Object Detection (1) Prediction Carriers"
+description: "Three paradigm shifts in prediction carriers: naive grids, anchor templates, point measurement, and set queries, with the geometric-prior tradeoff running through them."
+---
+
+# Deconstructing Object Detection (1): Prediction Carriers
+
+After backbone feature extraction, a detection network's outputs must solidify into a batch of candidate entities. The **prediction carrier** is the basic representational carrier that forward propagation emits directly — before any non-maximum suppression (NMS) or threshold filtering.
+
+The carrier decides the whole system's input-output protocol. It bounds how many candidate slots a single image can hold, defines each slot's physical geometric meaning, and determines whether the model can handle overlap, occlusion, and multi-scale objects. If the carrier has dead zones in spatial resolution or geometric capacity, no downstream feature extraction or loss design can recover the missed or confused detections.
+
+Across detection history, carrier evolution was never linear performance scaling. It is a history organized around two axes: **handcrafted geometric priors** versus **unbinding from spatial coordinates**.
+
+## Starting point: naive grid regression (YOLOv1) and its capacity bottleneck
+
+In the earliest attempt to free deep-learning detection from external heuristics toward end-to-end real-time inference, YOLOv1 tried the most direct endogenous prediction scheme: **no prior templates at all; the feature map's spatial grid is the only carrier**.
+
+After convolutional downsampling, the input image is evenly divided into an $S \times S$ spatial grid (e.g. $7 \times 7$ or $20 \times 20$). Whichever cell contains an object's geometric center owns that object outright. Each cell emits a fixed-dimensional vector:
+
+$$
+\mathbf{v}_{\text{grid}} = \big[ \mathbf{p}_{\text{cls}}, (c_1, x_1, y_1, w_1, h_1), (c_2, x_2, y_2, w_2, h_2) \big]
+$$
+
+- $\mathbf{p}_{\text{cls}} \in \mathbb{R}^{C}$ is the cell-shared conditional class probability distribution.
+- Each cell may emit $B$ candidate boxes ($B=2$ in the original setting), each a confidence scalar $c_b$ plus dimensionless coordinates $(x_b, y_b, w_b, h_b)$ offset from the cell's top-left corner.
+
+YOLOv1 mapped prediction slots to image space in the most direct way possible — essentially the earliest dense anchor-free attempt. But naive grid binding hit a structural bottleneck immediately:
+
+1. **Overlapping objects are inexpressible**: the whole class distribution $\mathbf{p}_{\text{cls}}$ is shared inside a cell, and the design assumes one cell serves one center. When two objects occlude each other with centers projected into the same cell, the network physically cannot emit two independent entities. During training the two boxes fight over one ground-truth assignment, producing misses or a forced malformed giant box.
+2. **No geometric scale prior makes convergence hard**: with nothing to anchor on, fitting absolute sizes spanning orders of magnitude from scratch sends optimization into violent oscillation.
+
+:::caution[The YOLOv1 lesson]
+A single prediction slot per discrete spatial grid fundamentally cannot carry multi-object overlap and dense layouts. The network needs parallel multi-slot expression at the same spatial position, plus a more stable scale baseline for optimization.
+:::
+
+## Paradigm 1: Anchor-based geometric templates
+
+To safely multiply prediction slots inside the network, Faster R-CNN invented the Region Proposal Network (RPN) and put **anchors** on the historical stage. SSD, RetinaNet, and YOLOv2/v3 followed, establishing anchor dominance for years.
+
+### Mechanism
+
+The anchor idea abandons asking the network to guess absolute object sizes. Instead, every spatial sampling point of the feature map is pre-tiled with rigid geometric templates of different sizes and aspect ratios. With $K$ presets per location, that location instantly gains $K$ parallel prediction slots.
+
+On a feature map of stride $s$, at position $(i, j)$ the network places prior rectangles $\mathcal{A}_{i,j} = \{ (x_a^k, y_a^k, w_a^k, h_a^k) \}_{k=1}^K$ at the corresponding image center. For each anchor $k$ it emits dimensionless relative transform offsets $\mathbf{t} = (t_x, t_y, t_w, t_h)$, decoded into predicted boxes through the standard geometric inverse transform:
+
+$$
+\begin{aligned}
+x &= x_a + t_x \cdot w_a, & y &= y_a + t_y \cdot h_a \\
+w &= w_a \cdot \exp(t_w), & h &= h_a \cdot \exp(t_h)
+\end{aligned}
+$$
+
+One feature point can now stack a tall template (e.g. $1:2$) alongside a square one ($1:1$). Even if two objects' centers project into nearly the same spatial neighborhood, shape or scale differences let different anchors capture them, each with an independent classification head. YOLOv1's one-position-one-entity limit breaks.
+
+### Inherent costs
+
+Anchors trade handcrafted priors for capacity and training stability, at a heavy price:
+
+- **Slot combinatorics and extreme sample imbalance**: on a $640\times 640$ image with stride-8/16/32 feature maps, spatial points total $80\times 80 + 40\times 40 + 20\times 20 = 8400$. Nine anchors per point generate $8400 \times 9 = 75600$ candidate units, while a typical image holds only a handful of real objects — over $99.9\%$ of slots are pure background negatives. The imbalance forces harsh online sampling (e.g. OHEM) or redesigned classification losses (e.g. Focal Loss).
+- **Brittle handcrafted hyperparameters**: anchor sizes and aspect ratios are hard-coded. If engineers set the smallest anchor to $32\times 32$ pixels for a generic dataset, tiny or extreme-aspect-ratio distant objects overlap no prior well. The network must predict huge negative $t_w, t_h$ offsets to pull sizes back, inviting gradient oscillation.
+
+### In-architecture remedies
+
+Without overthrowing anchors, the community patched continuously:
+
+1. **Data-fitted priors (K-means clustering)**: starting with YOLOv2, anchor shapes stopped being hand-picked. K-means clustering over all training-set box annotations (with $1 - \text{IoU}$ distance) forces initial templates onto the true data distribution.
+2. **Pyramid cross-level decoupling (FPN)**: the Feature Pyramid Network splits the massive per-point anchor set by scale — shallow high-resolution maps host tiny templates, deep low-resolution maps host large ones. Templates per point drop from 9 to 3 or even 1, relieving single-position redundancy.
+3. **Relaxed sample matching (static IoU to adaptive dynamic assignment)**: fixed IoU thresholds (e.g. IoU $> 0.5$ for positives) often leave small objects with zero qualifying anchors. ATSS (Adaptive Training Sample Selection) and SimOTA compute dynamic matching thresholds per object instead. The finding reveals a core fact: **an anchor's real value is defining the trial sampling geometry of candidate regions, not a rigid positive/negative verdict line**.
+
+## Paradigm 2: Template-free point / dense anchor-free
+
+Once FPN solved multi-scale feature routing and Focal Loss plus dynamic matching tamed positive/negative imbalance, researchers asked the obvious question: **if the capacity and scale bottlenecks that forced anchors in are now largely digested by surrounding components, why keep carrying hyperparameter-laden geometric boxes at every position?**
+
+Modern anchor-free detectors — FCOS, CenterNet — cut carriers back down to **points** on the spatial feature map.
+
+### Mechanism
+
+In point-regression systems, every valid pixel $(x, y)$ of the feature map is itself a template-free observation post, mapped to the input-image sampling center:
+
+$$
+\big(x_{\text{orig}}, y_{\text{orig}}\big) = \left( x \cdot s + \left\lfloor \frac{s}{2} \right\rfloor, \; y \cdot s + \left\lfloor \frac{s}{2} \right\rfloor \right)
+$$
+
+Instead of scale-shift relative to templates, the network emits a four-dimensional physical distance vector $\mathbf{d} = (l, t, r, b)$: the actual pixel distances from the current image-mapped point to the object's left, top, right, and bottom borders.
+
+CenterNet goes further: rather than regressing from every interior point, it collapses carriers onto geometric center extrema, locating object centers through heatmap Gaussian peaks and emitting continuous sizes $(w, h)$ directly at each peak.
+
+Point regression compresses each feature point's slots to exactly 1. Total candidates across a three-level pyramid drop from 75,600 to 8,400, with zero anchor size/ratio hyperparameters.
+
+### Inherent costs
+
+Dropping templates cleans the pipeline but charges new technical prices:
+
+- **Semantic conflict on overlaps**: when two entities' boxes intersect, points in the shared region cannot tell whether to measure outward to object A or object B — label assignment turns ambiguous.
+- **Flooding of low-quality edge boxes**: in dense non-extremum regression (e.g. FCOS), a large object contains hundreds of feature points. Edge pixels far from the geometric center sit on background-heavy receptive fields with weak discriminative semantics. Measuring long distances outward from them easily yields high-confidence but geometrically deformed junk boxes.
+
+### In-architecture remedies
+
+Dense anchor-free detectors corrected themselves through precise geometric controls, without reintroducing anchors:
+
+1. **Inter-level scale isolation via FPN**: each feature level gets a strict maximum regression distance. In the same overlapping region, small objects activate as positives only on shallow maps (e.g. P3), large objects only on deep maps (e.g. P7) for long-range measurement. Physical layering decouples most spatial overlap in the depth dimension.
+2. **Centerness / IoU-aware patch branches**: FCOS adds a parallel centerness branch emitting decay weights from each point's normalized distance to the object's geometric center:
+   $$
+   \text{Centerness} = \sqrt{\frac{\min(l, r)}{\max(l, r)} \times \frac{\min(t, b)}{\max(t, b)}}
+   $$
+   At inference the classification score multiplies centerness directly. Off-center edge points get their mistaken high confidence pulled down fast and removed cleanly at NMS.
+3. **Positive-sample core shrinkage (center sampling)**: abandoning "every point inside the box is positive", only points within a fixed radius of the object center (e.g. $1.5 \times \text{stride}$) count as positives, cutting blurry-edge feature pollution of gradients at the source.
+
+## Paradigm 3: Grid-unbound set queries
+
+By the dense anchor-free stage, ATSS experiments showed that with identical dynamic assignment policies, tuned anchor-based and dense anchor-free detectors converge to within $1\%$ accuracy of each other.
+
+But both mainstream paradigms still share one ultimate assumption: **carriers must correspond strictly to the feature map's discrete pixel grid**.
+
+- Anchor or not, the network carpet-scans thousands of discrete coordinates asking "space, what objects do you hold".
+- Dense spatial scanning guarantees several to dozens of neighboring units fire on one real object, mandating NMS — non-differentiable, threshold-laden handcrafted post-processing.
+
+To break "spatial-grid hostage-taking" and NMS dependence together, DETR proposed a third carrier philosophy: **object queries**.
+
+### Mechanism
+
+DETR severs the hard mapping between prediction slots and input pixel coordinates, declaring upfront a fixed-capacity learnable vector set:
+
+$$
+\mathcal{Q} = \{ \mathbf{q}_1, \mathbf{q}_2, \dots, \mathbf{q}_N \}, \quad \mathbf{q}_n \in \mathbb{R}^{d}
+$$
+
+Typically $N=300$ (or $100$). At initialization these are just static embeddings in a parameter matrix — no image coordinates, no size limits. They are $N$ globally sighted **abstract entity slots**.
+
+Fed as a whole into the Transformer decoder, the $N$ queries interact through multi-layer cross-attention with flattened full-image features. Each slot independently feeds a feed-forward network emitting unconstrained globally normalized coordinates $(c_x, c_y, w, h)$ plus a class distribution including the background empty class $\varnothing$.
+
+For losses, DETR introduces Hungarian **bipartite matching**: each ground-truth object is forcibly matched to exactly one best prediction among all $N$ slots; unmatched slots are supervised as background $\varnothing$.
+
+The design is theoretically pure:
+
+- Slots are not decided by "which pixel grid the object lands on";
+- slots communicate and sense each other through self-attention;
+- if slot 1 locks a target, slot 2 steers away on its own — **natural one-to-one entity prediction with no NMS**.
+
+### Inherent costs
+
+Total unbinding costs dearly:
+
+- **No spatial inductive bias means painfully slow convergence**: CNNs are born with translation invariance and locality priors; DETR queries start knowing nothing about image geometry. Global attention forces every query to discover "where in the picture should I look" over long training. Original DETR needs 50–100 epochs to converge, exploding training compute.
+- **Tiny-object attention dilution**: global attention costs $O((HW)^2)$ in feature resolution, so DETR cannot directly use large high-resolution shallow maps. Tiny objects' weak high-frequency features wash out through deep downsampling and soft global attention, visibly degrading small-object accuracy.
+
+### In-architecture remedies: reintroducing spatial priors
+
+Pure global queries' slow convergence forced a realization: **discarding spatial constraints entirely is not optimal**. Keeping set prediction and NMS-free outputs, follow-up architectures started a "bring local priors back into queries" reflux:
+
+1. **Explicit reference points with local sparse sampling (Deformable DETR)**: dropping dense full-image attention, each query gets a learnable or feature-predicted **2D reference-point coordinate**. Cross-attention is restricted to a few adaptively sampled positions around it. Locality bias returns while query freedom stays, speeding convergence 10× or more.
+2. **Position/content decoupling (Conditional DETR / Anchor DETR)**: the black-box query splits into explicit **positional (spatial) queries** and semantic **content queries**. Anchor DETR goes as far as defining queries directly as discrete anchor points or box coordinates in image space.
+
+## Evolution: three rounds and a closed loop
+
+| Paradigm | Representative models | Total slots | Slot–pixel relation | Main cost | In-architecture remedy |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Naive grid / early anchor-free** | YOLOv1 | Very few (hundreds) | Strongly bound (one grid owns one object) | Overlap capacity lockup; scale-prior-free regression diverges | No direct fix; pushed the field toward template expansion |
+| **Prior-template (anchor-based)** | Faster R-CNN (RPN), SSD, YOLOv3 | Huge (tens of thousands to hundreds of thousands) | Strongly bound (multiple geometric templates per grid center) | Slot combinatorics; $99.9\%$ pos/neg imbalance; hypersensitive size-ratio priors | K-means distribution fitting; FPN cross-level shunting; ATSS dynamic matching relaxation |
+| **Modern point-based (dense anchor-free)** | FCOS, CenterNet, YOLOv8 | Medium (thousands) | Strongly bound (pixels measure outward directly) | Overlap-region semantic conflict; low-quality far-from-center edge boxes | FPN max-distance scale decoupling; centerness quality suppression; center-sampling shrinkage |
+| **Set-query (query-based)** | DETR, Deformable DETR | Very few (100–300) | **Fully unbound** (global self-attention interaction) | Missing local spatial priors; extremely slow convergence; small-object attention dilution | 2D reference-point binding; position/content decoupling; reintroduced continuous spatial priors |
+
+:::tip[The closed loop]
+Detectors started from crude template-free grids (YOLOv1), added discrete rigid templates for capacity (anchor-based); once FPN and advanced assignment matured, shed handcrafted templates for lightweight point measurement (dense anchor-free); when rigid grid binding became the last obstacle to NMS removal, cut the grid entirely for global set queries (query-based); and to fix global-query optimization pain, reintroduced spatial anchors and reference points inside the continuous coordinate system.
+:::
+
+Defining carriers' geometric form and organization only settles the model's outward interface protocol. The next engineering question: **however a carrier looks — anchor, pixel, or abstract query — how does it sample context signals from the backbone's high-dimensional discrete feature maps?**
+
+That signal-readout evolution unfolds in [Part 2: Feature Sampling](./feature-sampling).

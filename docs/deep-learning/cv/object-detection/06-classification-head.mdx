@@ -1,0 +1,161 @@
+---
+sidebar_position: 7
+title: "Deconstructing Object Detection (5) Classification Confidence and Detection Heads"
+description: "Detection heads from background drowning to task alignment: how Focal Loss, decoupled heads, and TOOD fix the classification-localization mismatch."
+---
+
+# Deconstructing Object Detection (5): Classification Confidence and Detection Heads
+
+Sorted by classification score descending, the $0.95$ box often gets stuck between those two people ahead, covering neither; the distant sign's score may sit at $0.15$, discarded at pre-filtering.
+
+This reflects two long-standing contradictions prediction heads face: in dense candidate space, pure-background regions outnumber real objects so vastly that faint object signals drown in accumulated easy-negative gradients; and classification-branch high-confidence scores say nothing about how accurately the box is geometrically drawn.
+
+The prediction head is the detection network's extremity — facing loss functions directly, emitting predictions directly. At every candidate position it must answer two questions: what category of object lives here, and exactly where its geometric borders lie. The two subtasks repel each other in representational needs and optimization directions throughout.
+
+## Why classification scores cannot measure localization quality
+
+Pure image classification pursues translation invariance. Whether a cat sits top-left, center, or bottom-right, classifiers want deep features firing "cat" responses strongly regardless.
+
+But detection must also emit concrete geometric box coordinates $[x, y, w, h]$. Heads are natively translation-sensitive to spatial geometry: shifting the object 2 pixels or expanding the predicted box 3 pixels outward must change the emitted coordinate offsets accordingly.
+
+Using classification-branch scores directly as the sole measure of whole-box quality buries the hazard.
+
+Return to those two overlapping central pedestrians. When a predicted box lands exactly between them, its feature receptive field covers the left pedestrian's head contours and the right pedestrian's torso edges simultaneously. For texture-hunting classification branches, the field holds intensely human visual patterns. Classification convolutions never ask whether features belong to one person or two — strong human-like structure anywhere suffices for near-1.0 confidence.
+
+Geometrically, though, the box's IoU with either ground truth is terrible. It aligns with neither the left nor the right pedestrian, scoring below 0.3 against both.
+
+Conversely, another box near one pedestrian's exact borders may hug body contours tightly at IoU 0.9. But its generating grid sits on edge contours or dimly lit clothing folds with locally atypical features, so the classification branch scores it only 0.45.
+
+Under score-sorted post-processing, the IoU-0.3 deformed box ranks first on 0.95; the IoU-0.9 precise box ranks last or dies at pre-filtering on low score.
+
+Classification heads answer only for local features' semantic richness, never for box geometric coincidence. Working heads must first fix massive-background gradient imbalance, then dissolve classification-versus-localization conflicts in feature representation and optimization objectives.
+
+## Thousand-to-one background drowning: objectness to Focal Loss
+
+On a $640\times 640$ input, modern dense prediction heads tile prediction points across downsampled feature maps. With stride-8/16/32 triple maps:
+
+- stride-8 maps span $80\times 80$, contributing 6,400 prediction positions;
+- stride-16 maps span $40\times 40$, contributing 1,600;
+- stride-32 maps span $20\times 20$, contributing 400.
+
+Summed, one image generates $6400 + 1600 + 400 = 8400$ candidate grids.
+
+Genuine object grids among them are vanishingly few. That distant $16\times 16$ sign occupies at most $2\times 2 = 4$ stride-8 grids; the two central pedestrians together occupy dozens. Positive-sample grids per image usually number in the tens; the remaining 8,300-plus grids are pure background — open sky, flat asphalt, blank building walls.
+
+Dense-prediction positive/negative ratios readily reach tens-to-one or even beyond a thousand-to-one.
+
+Early detectors countered the disparity with an objectness side branch. Objectness means "object existence" — a binary scalar judging whether a candidate region holds something versus pure background. Early single-stage algorithms split final class confidence as $P(\mathrm{Class}_i) = P(\mathrm{Object}) \times P(\mathrm{Class}_i \mid \mathrm{Object})$. The objectness branch emits the first factor (prior probability that the position holds an object); the class branch emits the second (probability of class $i$ given an object).
+
+Conceptually separating "is there anything" from "what is it" never fixed gradient drowning mathematically. Whether objectness or multi-class branches, standard binary cross-entropy (BCE) losses let massive backgrounds accumulate into training-crushing totals.
+
+For standard BCE, single-sample loss and label-aligned probability $p_t$ read:
+
+$$
+\begin{aligned}
+\mathrm{CE}(p, y) &= \begin{cases} -\log(p) & \text{for } y = 1 \\ -\log(1 - p) & \text{for } y = 0 \end{cases} \\
+p_t &= \begin{cases} p & \text{for } y = 1 \\ 1 - p & \text{for } y = 0 \end{cases}
+\end{aligned}
+$$
+
+with true label $y \in \{0, 1\}$ and predicted positive probability $p \in [0, 1]$. Cross-entropy compacts to $\mathrm{CE}(p_t) = -\log(p_t)$.
+
+Apply this to those 8,300-plus background grids. Most backgrounds judge trivially — clean blue sky earns $p = 0.01$ effortlessly, i.e. $p_t = 1 - 0.01 = 0.99$. Single easy-background loss is $\mathrm{CE}(0.99) = -\log(0.99) \approx 0.010$ — tiny alone. But 8,300 simultaneous easy negatives backpropagate to $8300 \times 0.01 \approx 83$ accumulated.
+
+That $16\times 16$ distant sign, tiny and blurry-edged, may earn only $p = 0.2$ positive probability ($p_t = 0.2$). Its single hard-positive loss is $\mathrm{CE}(0.2) = -\log(0.2) \approx 1.61$ — hundreds of times one easy sample's, yet still dominated in sum by thousands of easy backgrounds in absolute count. Optimizer updates follow the massive easy-background push, tuning parameters down on long-classified skies and roads while the sign's genuinely needed positive signal drowns in background-gradient oceans.
+
+Focal Loss breaks the count disparity by reweighting the loss with a confidence-based modulation term before standard cross-entropy:
+
+$$
+\mathrm{FL}(p_t) = -(1 - p_t)^\gamma \log(p_t)
+$$
+
+with paper-supplied modulation hyperparameter $\gamma \ge 0$ (conventionally fixed at $\gamma = 2$ in general practice).
+
+:::tip[The Focal Loss modulation mechanism]
+The modulator dynamically suppresses gradient weights of already-learned samples through predicted probability $p_t$. Easy samples (open-sky backgrounds at $p_t = 0.99$) get modulator $(1 - 0.99)^2 = 0.0001$ — the original 0.01 loss weakened ten-thousand-fold, gradients nearly frozen. Hard samples (the small sign at $p_t = 0.2$) keep modulator $(1 - 0.2)^2 = 0.64$, loss mostly preserved. Heads under extreme imbalance keep update directions concentrated on the few hard-to-distinguish real objects.
+:::
+
+## Feature conflict: coupled versus decoupled heads
+
+With background gradient imbalance suppressed, the head's internal physical structure becomes the accuracy bottleneck.
+
+Early single-stage detectors universally used coupled heads: pyramid features enter two or three shared convolution layers, then split at the end into two parallel $1\times 1$ convolutions emitting class scores and box coordinate offsets separately.
+
+The structure bakes in a substrate assumption: deep-representation features for semantic classification and geometric localization are highly overlapping and fully universal.
+
+But feature analysis shows classification and localization demand fundamentally repellent representations:
+
+1. **Classification wants semantic abstraction and translation invariance**. Class branches want kernels ignoring tiny spatial perturbations, focusing on faces, shoulders, torsos, and other high-level semantics. Even as parts shift slightly across the map, class branches want deep features holding stable strong activations.
+2. **Localization wants spatial fineness and translation sensitivity**. Border-regression branches must pin down exactly which pixel step holds object outer edges. Their only concern is where edge contours jump. Over-smoothed maps erasing high-frequency spatial detail leave regression branches unable to fix exact edge cutoffs.
+
+Sharing convolutions pits backpropagated gradients against each other inside shared layers. Classification losses demand widened receptive fields aggregating human contours; localization losses demand guarding edge-pixel high-frequency jumps. Shared layers compromise unwillingly, with classification gradients striking directly into box-regression feature channels and degrading border accuracy.
+
+Ending the civil war, decoupled heads became the modern standard. Left is the coupled head: classification and localization share convolutions, forking only at the final $1\times 1$. Right is the decoupled head: features split into two private convolutions at head entry.
+
+![Coupled versus decoupled head structures: coupled heads share convolutions and fork only at the end; decoupled heads split into private classification and localization branches at entry](/img/cv_img/object-detection/coupled-vs-decoupled-head.png)
+
+In decoupled architectures, input maps split immediately into two independent physical branches: private classification convolutions extract high-level semantics, private localization convolutions preserve spatial edge detail.
+
+After decoupling, classification-loss gradients stay inside classification branches and localization-loss gradients inside localization branches. Classification gradients no longer strike box-regression features directly; localization branches concentrate on pedestrians' subtle pixel edge variations while classification branches freely aggregate discriminative semantics.
+
+Decoupling ends gradient-level civil war — but opens a new structural fracture.
+
+## The post-decoupling fracture: branches minding their own business
+
+Physically fully separated, classification and localization branches run on independent tracks with no communication channel.
+
+Classification branches compute alone, watching only classification features to emit confidence $s$; localization branches compute alone, watching only localization features to emit coordinates (corresponding to IoU). Scoring never sees what shapes localization drew; border fine-tuning never knows current score levels.
+
+The separation directly worsens the opening "high-score-low-quality" phenomenon:
+
+1. **High-score-low-quality boxes**: in two interlaced pedestrians' core region, rich features earn classification $s = 0.95$. But dual-contour interference leaves regressed borders stuck between the two people at IoU $= 0.35$ with true objects.
+2. **Low-score-high-quality boxes**: on a single pedestrian's edge grid, atypical classification features score $s = 0.40$. But clear outer edges there regress into extremely coincident boxes at IoU $= 0.90$.
+
+Existing inference pipelines can only sort candidates by classification score $s$ descending. The result is predictable: the $s = 0.95$, $\mathrm{IoU} = 0.35$ broken box ranks first; the $s = 0.40$, $\mathrm{IoU} = 0.90$ precise box ranks last or dies outright.
+
+:::note[The price of decoupling]
+Physical decoupling cured backpropagation-time gradient conflict but tore classification–localization synergy apart at forward-prediction time. If classification scores cannot reflect localization quality, decoupled heads merely moved the contradiction from feature layers to decision layers.
+:::
+
+## Task alignment: heads emitting localization-honest scores (TOOD)
+
+Fixing post-decoupling fracture requires head-emitted classification scores that keep pace with localization quality.
+
+Task alignment (building classification–localization coordination inside detection heads so classification confidence tightly tracks localization IoU) entered head design in exactly this context. In Task-aligned One-stage Object Detection (TOOD), the core idea keeps decoupling while letting both tasks interact dynamically at the feature level and reshaping classification scores' optimization targets.
+
+TOOD rebuilds heads in two key ways:
+
+First, **task-aligned heads**. Branches no longer stay fully isolated; lightweight cross-task interaction lets classification branches read localization branches' spatial-distribution features through attention before emitting final features, and localization branches ingest classification branches' semantic activations before computing border offsets. Mutual feature-level sensing lets classification branches know each position's spatial border credibility in advance.
+
+Second, **an explicit alignment metric**. To give training something to aim at, TOOD proposes a unified classification-plus-localization quality measure $t = s^\alpha \times \mathrm{IoU}^\beta$:
+
+- $s \in [0, 1]$ is the classification branch's confidence on some true class;
+- $\mathrm{IoU} \in [0, 1]$ is the current position's predicted-versus-truth box overlap;
+- $\alpha$ and $\beta$ weight their relative importance.
+
+The multiplicative logic is strict: combined alignment $t$ nears 1.0 only when classification confidence $s$ is extremely high **and** predicted-truth coincidence $\mathrm{IoU}$ is extremely high. Any shortfall on either side drags $t$ down hard through multiplication.
+
+With alignment metric $t$ in hand, TOOD makes one decisive optimization change: **it discards traditional 0-or-1 discrete hard classification labels, normalizing scalar $t$ directly into the classification branch's soft target labels.**
+
+Under task alignment, classification learning targets become dynamically computed $t$:
+
+- a grid whose predicted borders draw crudely — however rich its interior semantic textures — computes tiny $\mathrm{IoU}$, so target $t$ may sit at 0.2. Loss pressure actively lowers that position's confidence instead of awarding inflated scores;
+- only as localization branches learn to tighten borders, pushing predicted IoU above 0.85, does alignment $t$ climb toward 0.85, permitting classification branches to learn higher scores.
+
+The mechanism changes classification scores' physical meaning. Task-aligned heads' "classification scores" are no longer mere local-pixel class-membership probabilities but **reliability metrics combining category attributes with geometric localization quality**.
+
+In two interlaced pedestrians' overlap zone, the stuck-in-the-middle deformed box's classification score is systematically suppressed for tiny $\mathrm{IoU}$; precise boxes generated at clear pedestrian edges, holding qualified semantics plus extreme IoU, ride smoothly to high scores. Inference-time post-processing ordering restores to normal.
+
+Note that TOOD's alignment $t$ not only reshapes classification loss targets inside heads but also supplies the basis for later positive/negative selection. How the score enters cost matrices to select grids belongs to the larger dynamic-assignment machinery covered by dedicated [Part 3: Label Assignment](./label-assignment). The head's mission at this step is ensuring every emitted score withstands geometric-precision inspection.
+
+## After heads: why multi-scale feature scheduling remains
+
+Reviewing head evolution: Focal Loss suppresses easy-background accumulated gradients so scarce small objects learn normally; decoupled heads split classification and localization channels to avoid cross-task gradient interference in feature extraction; task-alignment mechanisms import localization quality into classification targets so output scores reflect localization merit.
+
+But all these mechanisms presuppose informative input feature maps.
+
+Return to that $16\times 16$-pixel distant sign: through layer-by-layer downsampling, feature maps compressed to stride 32 hold only $20\times 20$ points — the sign mathematically occupies less than one full pixel, its spatial contours already downsampled out of existence in deep backbone layers.
+
+If shallow localization edges cannot ship quickly to deep layers before reaching heads, and deep rich semantics cannot pour smoothly back into shallow ones, feature maps degrade into incomplete-information fragments. Facing a grid whose positional information is already lost on the map or whose discriminative features never existed, no head loss design, decoupling structure, or alignment metric — however exquisite — has anything to score.
+
+How feature maps build lossless bridges across resolutions — giving shallow layers object-understanding semantics and deep layers edge-localization precision — is no single head's battle. It belongs to the feature hub scheduling information between backbones and heads: [Part 6: Multi-Scale Features and Neck Architectures](./neck-architecture).
