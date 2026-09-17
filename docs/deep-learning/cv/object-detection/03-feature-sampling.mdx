@@ -1,0 +1,170 @@
+---
+sidebar_position: 4
+title: "Deconstructing Object Detection (2) Feature Sampling"
+description: "From dense grid convolution, deformable convolution, and RoIPool/RoIAlign to deformable attention and dynamic convolution: how feature sampling closes the gap between discrete grids and the continuous world."
+---
+
+# Deconstructing Object Detection (2): Feature Sampling
+
+Detection narratives often place Faster R-CNN and DETR in different eras: the former as the classic two-stage region-proposal network cropping local features with candidate regions (RoIs), the latter as the Transformer-based end-to-end detector emitting boxes from learned object queries. Yet at the geometric-sampling level, both belong to the same camp — each first selects candidate positions in continuous space, then actively samples features at the corresponding feature-map coordinates.
+
+The opposite camp is dense sampling in single-stage networks: no positions are preselected; instead every regular grid of the feature map is swept indiscriminately.
+
+The fork has one root cause: continuous object contours versus discrete integer feature grids are intrinsically misaligned. Quantization causes boundary aliasing; fixed-rule sampling points landing on object edges inevitably pick up neighboring background noise. Feature sampling exists to extract the target entity's feature representation from discrete maps with minimum geometric distortion.
+
+## Dense sampling: rule-grid local convolutional sampling
+
+Dense sampling is the most basic feature extraction in single-stage detection. Its core property: there is no "select positions first" step at all.
+
+Data-wise, dense sampling takes all regular grid coordinates $(x, y)$ of a whole feature map — usually one scale of a feature pyramid (e.g. stride-8, 16, or 32 levels; pyramid construction is covered in [Part 6: Multi-Scale Features and Neck Architectures](./neck-architecture)). At every discrete grid point, a standard $3\times 3$ convolution applies directly: centered on $(x, y)$, it uniformly gathers $3\times 3 = 9$ regular neighbors, linearly weights them through kernel parameters with nonlinear activation, and hands the result to the dense carrier bound to that grid (a preset anchor or an anchor-free center point; carrier definitions are in [Part 1: Prediction Carriers](./prediction-carrier)), whose head emits class probabilities and box regressions in parallel.
+
+The advantage is highly regular, parallelizable computation: identical operations at every spatial point let hardware finish whole-map inference in efficient matrix multiplies. The rigidity costs geometry:
+
+For slender, tilted, or irregular contours, the symmetric $3\times 3$ square falls partly on irrelevant background or neighboring objects whenever its center aligns with an object edge — interference mixed in from the first sample.
+
+For tiny objects on heavily downsampled maps, sampling-center drift appears. If the object's physical center falls between feature grids (e.g. float coordinate 10.5), rule convolutions can only cut at integer grids (10 or 11). The systematic bias between sampling position and true geometric center leaves persistently asymmetric background noise in shallow features, capping downstream fine-regression accuracy.
+
+## Deformable convolution: offsets on the rigid grid
+
+To break the rule grid's grip on object geometry, deformable convolution (DCN) adds learnable spatial offsets to conventional sampling.
+
+In standard 2D convolution, the regular sampling grid on feature map $x$ is a local coordinate set $\mathcal{R}$ — for $3\times 3$ kernels, $\mathcal{R} = \{(-1,-1), (-1,0), \dots, (0,1), (1,1)\}$. At any center $p_0$, standard convolution computes $y(p_0) = \sum_{p_n \in \mathcal{R}} w(p_n) \cdot x(p_0 + p_n)$, with $p_n$ enumerating the 9 integer relative offsets and $w(p_n)$ the corresponding kernel weights.
+
+Deformable convolution adds a spatial offset vector $\Delta p_n$ per sampling point:
+
+$$
+y(p_0) = \sum_{p_n \in \mathcal{R}} w(p_n) \cdot x(p_0 + p_n + \Delta p_n)
+$$
+
+The offsets $\Delta p_n$ are not handcrafted geometry. A lightweight side-branch standard convolution running on the input feature map predicts them dynamically. Learned offsets are usually continuous reals, so $p = p_0 + p_n + \Delta p_n$ rarely lands on integer grids — features at continuous $p$ must be read with bilinear interpolation.
+
+With $q$ ranging over all discrete integer positions of $x$, interpolation reads $x(p) = \sum_{q} G(q, p) \cdot x(q)$ where $G(q, p) = \max(0,\, 1 - |q_x - p_x|) \cdot \max(0,\, 1 - |q_y - p_y|)$. Only the 4 nearest neighbors within distance 1 of $p$ carry nonzero weight, so computation touches just those 4 points.
+
+To further suppress background, improved deformable convolution (DCNv2) multiplies each sampling point by a modulation weight $\Delta m_n \in [0, 1]$: $y(p_0) = \sum_{p_n \in \mathcal{R}} w(p_n) \cdot x(p_0 + p_n + \Delta p_n) \cdot \Delta m_n$.
+
+The operating mechanism is transparent:
+
+- **Input positions**: all regular grid coordinates $p_0$ across the feature map.
+- **Sources and count**: offset channels from the side convolution drive bilinear-interpolated sampling of 9 irregularly arranged points around $p_0$ on the current map.
+- **Output target**: aggregated deformable features return to the dense carrier bound to the current grid.
+
+On overlapping multi-object and complex-contour scenes, geometric adaptivity shines. Centered on a non-rigid or slender object, the 9 learned points stretch along its contour instead of holding a dead square; near occlusion or background boundaries, modulation weights $\Delta m_n$ decay toward zero by themselves — precise capture of deformed and occluded objects inside a dense-sampling framework.
+
+## RoIPool: geometric bias from double rounding
+
+Moving from single-stage dense prediction to two-stage architectures changes sampling logic fundamentally: instead of cutting indiscriminately at every grid, the network first generates candidate boxes through a region-proposal network, then extracts local features specifically for those regions. This family starts with RoIPool.
+
+RoIPool's contract is explicit: whatever size or aspect ratio an external proposal has, cut that region from backbone feature maps and compress it into a fixed-size (usually $7\times 7$) feature block for downstream fixed-parameter fully connected classification and regression.
+
+Suppose the backbone (e.g. ResNet with stage channels $C_3=512, C_4=1024, C_5=2048$) emits stride-$S = 16$ maps. A proposal arrives in continuous float image coordinates $B = (x_1, y_1, x_2, y_2)$. RoIPool's pipeline forces two integer quantizations:
+
+1. **Proposal-to-map quantization**: coordinates divide by stride $S$. Since pixel indices must be integers, RoIPool floors directly: $x'_1 = \lfloor x_1 / S \rfloor$, $y'_1 = \lfloor y_1 / S \rfloor$, $x'_2 = \lfloor x_2 / S \rfloor$, $y'_2 = \lfloor y_2 / S \rfloor$. The mapped region spans width $w' = x'_2 - x'_1$ and height $h' = y'_2 - y'_1$.
+2. **Fixed-bin quantization**: to emit a $k\times k$ (e.g. $7\times 7$) map, the quantized region splits into $k\times k$ bins of theoretical size $w'/k$ by $h'/k$. Bin boundaries must align to discrete grids, so RoIPool force-rounds every bin's size and origin again.
+3. **In-bin pooling**: inside each rounded bin, all covered feature points are scanned with max pooling, selecting the single strongest response as the bin's representative.
+
+RoIPool's sampling interface in summary:
+
+- **Input positions**: externally supplied continuous float box coordinates $B = (x_1, y_1, x_2, y_2)$.
+- **Sources and count**: on a deep map (e.g. ResNet $C_4$), all discrete integer points inside each of $7\times 7 = 49$ quantized bins, reduced to 49 maxima.
+- **Output target**: a $7\times 7\times C$ tensor delivered to that proposal's dedicated carrier.
+
+The geometry cost is severe. Two crude floor operations bake irreversible position drift into the map.
+
+Take a $16\times 16$ small object with proposal $(10, 10, 26, 26)$. On a stride-16 map the theoretical float coordinates are $(0.625, 0.625, 1.625, 1.625)$ covering only $1.0\times 1.0$ of feature area. First quantization truncates them to $(0, 0, 1, 1)$. Splitting that into $7\times 7$ bins with total width and height of 1 pixel leaves most bins with zero pixel width — pooling degenerates.
+
+Large overlapping occluded objects suffer equally. A $200\times 100$ proposal with 0.5-grid rounding error on the map back-projects to an 8-pixel fixed geometric shift in the image. Where two close objects' contours touch, 8 pixels suffice to slide object A's feature block onto object B or to cut critical edge features out of the sampled region. Quantization distortion directly capped early two-stage networks on high-precision localization.
+
+:::caution[RoIPool's double quantization]
+Two crude floor operations bake irreversible position drift into the feature map: proposals round once when mapping onto the map, and bins round again when cutting fixed grids. Small objects' feature area can collapse at the first rounding; large objects inherit multi-pixel fixed shifts back-projected into the image.
+:::
+
+## RoIAlign: continuous bilinear interpolation erasing quantization error
+
+To eliminate RoIPool's two truncation errors, Mask R-CNN proposed RoIAlign. Its idea is pure: forbid every coordinate rounding through the whole sampling process; compute entirely in continuous float geometry.
+
+RoIAlign processes data in four steps:
+
+1. **Continuous projection**: divide the image-space float box $B = (x_1, y_1, x_2, y_2)$ by stride $S$ into float map coordinates — no rounding of any kind. Float width and height are $w = (x_2 - x_1)/S$ and $h = (y_2 - y_1)/S$.
+2. **Uniform float partition**: split the continuous float rectangle evenly into $k \times k$ (e.g. $7\times 7$) bins. Bin widths $\Delta w = w / k$ and heights $\Delta h = h / k$ stay exact floats, as do all four corner coordinates.
+3. **In-bin grid sampling with interpolation**: fix a regular set of sampling points per bin (usually $2\times 2 = 4$). Each point's absolute map coordinates $(p_x, p_y)$ come from uniform placement and stay float. Every non-integer point reads its continuous feature vector through bilinear interpolation over the 4 nearest discrete integer points.
+4. **In-bin aggregation**: average (or max) the 4 interpolated vectors per bin as the bin's output. The result assembles into a regular $k\times k\times C$ map.
+
+Point $p_j = (p_{jx}, p_{jy})$ in a bin interpolates from 4 integer neighbors as $f(p_j) = \sum_{i=1}^4 w_i \cdot f(q_i)$ with weights $w_i = \max(0,\, 1 - |p_{jx} - q_{ix}|) \cdot \max(0,\, 1 - |p_{jy} - q_{iy}|)$. The bin representative averages the 4 points: $f_{\mathrm{bin}} = \frac{1}{4} \sum_{j=1}^4 f(p_j)$.
+
+RoIAlign's readout interface:
+
+- **Input positions**: continuous float proposal coordinates $B = (x_1, y_1, x_2, y_2)$.
+- **Sources and count**: on the scale-selected pyramid level (e.g. $P_2 \sim P_5$), 4 interpolated points per each of $7\times 7 = 49$ float bins — $49 \times 4 = 196$ bilinear points sampled in continuous space.
+- **Output target**: a $7\times 7\times C$ continuous map for that RoI's dedicated head doing instance-level classification and regression.
+
+In two-stage refinement, RoIAlign killed RoIPool's quantization drift for good.
+
+## Deformable attention: sparse adaptive sampling for queries
+
+DETR's object queries opened attention-based feature sampling: each query computes global attention weights against every pixel of the whole map. Global attention sees broad context, but its compute and memory grow as $O(N_q \cdot H W)$ in map size. Once backbones add high-resolution multi-scale maps (e.g. stride-8 shallow features) for small objects, global attention costs quickly exceed hardware limits.
+
+Deformable DETR's deformable attention changes the global-search strategy at its root. Its key technical judgment: **sampling need not visit every position; each query only needs to focus adaptively on a tiny handful of discriminative local points.**
+
+Sampling is restricted to an extremely sparse point set around reference points. The full mechanism:
+
+Given multi-scale maps $\{x^l\}_{l=1}^L$ with $x^l \in \mathbb{R}^{C \times H_l \times W_l}$, each query carries a content vector $z_q \in \mathbb{R}^C$ and a 2D reference point $p_q = (p_{qx}, p_{qy}) \in [0, 1]^2$ in normalized image coordinates.
+
+Multi-scale deformable attention computes:
+
+$$
+\mathrm{MSDeformAttn}(z_q, p_q, \{x^l\}_{l=1}^L) = \sum_{m=1}^M W_m \left[ \sum_{l=1}^L \sum_{k=1}^K A_{m q l k} \cdot W'_m x^l\Big(\phi_l(p_q) + \Delta p_{m q l k}\Big) \right]
+$$
+
+Each symbol has an explicit computational meaning:
+
+- $M$ attention heads (usually $M = 8$); $W_m$ and $W'_m$ are output/input linear projections.
+- $L$ pyramid levels (usually $L = 4$, strides 8, 16, 32, 64).
+- $K$ extremely sparse sampling points per head per level (usually just $K = 4$).
+- $\phi_l(p_q)$ rescales normalized $p_q$ onto level $l$'s concrete float map coordinates.
+- $\Delta p_{m q l k}$ are real-valued 2D spatial offsets predicted directly from content vector $z_q$ through linear projection.
+- $A_{m q l k}$ are the per-point attention weights, likewise projected from $z_q$ and Softmax-normalized over all $L \times K$ points: $\sum_{l=1}^L \sum_{k=1}^K A_{m q l k} = 1$.
+- $x^l(\phi_l(p_q) + \Delta p_{m q l k})$ are multi-scale features read with bilinear interpolation at continuous offset coordinates.
+
+Note the **sparse-sampling essence**:
+
+- **Input positions**: each query's bound 2D float reference point $p_q$.
+- **Sources and count**: on $L=4$ pyramid levels, each of $M=8$ heads takes only $K=4$ points per level — 4 points per head per level, $8 \times 4 = 32$ points per query per level, $8 \times 4 \times 4 = 128$ points total per query per sampling pass across all 4 levels.
+- **Output target**: aggregated multi-scale sparse features update the query's own state vector, then feed its bound head for class and box outputs.
+
+Against DETR global attention, per-pass complexity drops from resolution-proportional $O(N_q \cdot HW)$ to resolution-independent $O(N_q \cdot C \cdot M L K)$.
+
+On multi-scale cluttered scenes this sparse geometry is remarkably expressive. For spatially interlaced occluded targets, an entity's query initializes its reference point near the geometric center. During attention, heads predict distinct adaptive offsets: some points stretch to true borders locking contours, others cluster inside reading key semantic textures; offsets near occluders or background steer away or receive near-zero weights $A_{m q l k}$. For tiny objects on high-resolution maps, the reference point lands precisely on the small region while shallow-map sparse points pull key high-frequency edge gradients straight from fine grids — without global attention's quadratic bill.
+
+## Sparse R-CNN: dynamic kernels on RoI features
+
+After deformable attention proved "sparse sampling with content-adaptive weights", Sparse R-CNN fused two-stage geometric region extraction with query-based content adaptation.
+
+Classical Faster R-CNN feeds RoIAlign's $7\times 7\times C$ local map into fixed fully connected or convolutional layers. Those kernel parameters freeze after training and filter every proposal identically. When boxes unavoidably contain background noise or overlapping neighbors, fixed weights can hardly reject the interference flexibly.
+
+Sparse R-CNN changes sampling. It introduces two learnable parameter groups as carriers: continuous proposal box coordinates and proposal feature vectors (query vectors).
+
+Its sampling runs in two phases:
+
+1. **Geometric pre-filtering**: proposal $B_i$ extracts a regular block $F_{\mathrm{RoI}} \in \mathbb{R}^{7 \times 7 \times C}$ from FPN multi-scale maps through RoIAlign — continuous-space sampling from full image to local geometric region.
+2. **Dynamic kernel generation**: proposal vector $z_i \in \mathbb{R}^C$ passes through linear layers generating instance-exclusive kernel weights and biases $\mathcal{W}(z_i)$ (typically two consecutive $1\times 1$ or lightweight grouped convolutions).
+3. **Instance-adaptive filtering**: the dynamic kernels convolve the freshly extracted $7\times 7$ RoI map directly: $F_{\mathrm{out}} = \mathrm{DynamicConv}(F_{\mathrm{RoI}},\, \mathcal{W}(z_i))$. Pooled and compressed afterward, the result updates proposal vector $z_i$ and emits final detection predictions.
+
+Sparse R-CNN's sampling interface:
+
+- **Input positions**: continuous float proposal coordinates $B_i$ plus proposal vector $z_i$.
+- **Sources and count**: RoIAlign first samples $7\times 7\times 4 = 196$ bilinear points in the pyramid; then $z_i$-generated dynamic weights filter those 49 spatial positions with instance-exclusive filtering.
+- **Output target**: filtered aggregated instance features return to the current proposal query for iterative box regression and classification.
+
+Under multi-object overlap and occlusion this shows unique strength. Cropping any proposal, RoIAlign's $7\times 7$ region inevitably mixes neighboring objects' local features through physical overlap. Fixed fully connected layers can hardly attribute features of two subjects on one map. But the responsible proposal feature $z_i$ dynamically generates that target's exclusive kernels, which recognize the entity's feature patterns while scanning the $7\times 7$ grid and actively suppress occluder interference through channel weighting — deep content-level filtering above local geometric sampling.
+
+## From grid sampling to sparse instances: evolution and boundary
+
+From dense whole-grid sampling to deformable-convolution offset compensation; from RoIPool's crude rounding to RoIAlign's continuous interpolation; to query-guided sparse sampling and dynamic filtering in deformable attention and Sparse R-CNN — detection feature sampling evolved along one clear logic: **erase the partition of the continuous physical world by rule discrete grids, buying the purest target geometry at minimum sampling cost.**
+
+:::tip[Two-stage and DETR converge]
+Despite divergent macro-architectures, two-stage networks and DETR-family models unify at the sampling-mechanism level: both abandon blind whole-grid traversal for the sparse path of "fix sparse candidate positions first, then pull local features from the map on demand".
+:::
+
+Yet however clever the sampling, it only solves "how to collect the object's geometric signal from feature maps without distortion". Whether densely convolved thousands of local groups or query-sparsely sampled hundreds of instance vectors, one basic contradiction remains: among thousands of sampled candidate positions, which ones deserve positive-sample supervision for real objects? When overlapping regions give multiple positions local signals, which one should the loss reward and which should it suppress as background?
+
+Recovering discriminative representations is sampling's job; binding those features to ground truth as positive/negative supervision belongs to [Part 3: Label Assignment](./label-assignment).
