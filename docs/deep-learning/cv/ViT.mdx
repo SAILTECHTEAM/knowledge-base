@@ -7,7 +7,7 @@ description: "Vision Transformer architecture, training, and comparison with CNN
 
 **Encoder Only**
 
-![alt text](/img/cv_img/ViTimg/image.png)
+![Overall Vision Transformer architecture](/img/cv_img/ViTimg/image.png)
 
 > Overall ViT architecture, including image patching, Linear Projection of Flattened Patches, Patch + Position Embedding, Transformer Encoder, MLP Head, and classification output.
 
@@ -25,7 +25,7 @@ Each patch contains `16×16×3 = 768` pixel values. It is flattened and then lin
 
 The flattened patch vectors enter the **Linear Projection of Flattened Patches** (`z = xW + b`), producing the initial patch embeddings. This is not yet the final visual feature extraction; the Transformer encoder learns richer relationships among patches.
 
-![alt text](/img/cv_img/ViTimg/image-1.png)
+![Splitting image patches and projecting them into tokens](/img/cv_img/ViTimg/image-1.png)
 
 > A `224*224*3` image is divided into 196 `16*16*3` patches. Each patch is flattened and mapped through a linear network to a 768-dimensional vector.
 
@@ -39,21 +39,21 @@ In implementation, convolution is used for the computation with:
 
 The same convolution weights are shared across every patch location. The result is a `14×14×768` feature map, which is reshaped into a `196×768` token matrix.
 
-![alt text](/img/cv_img/ViTimg/image-2.png)
+![Convolutional implementation of patch embedding](/img/cv_img/ViTimg/image-2.png)
 
 > Using 768 `16*16*3` convolution kernels with stride `S=16` and `P=0`, the output is `14*14*768` and is flattened into 196 vectors of 768 dimensions.
 
 ## Classification Token (cls token)
 
-1. Randomly initialize the `CLS` parameter with the same dimension as a token embedding (`1×768`).
+1. Randomly initialize the `cls` parameter with the same dimension as the model input (`1*768`).
 2. Each `batch` copies the same `cls token`. A `batch` is the number of images processed at the same time. For example, `batch=32` means processing 32 images simultaneously, calculating 32 `loss` values, and taking their average for backpropagation.
 3. Update the parameter through backpropagation.
 
 ### Next
 
-The `CLS` parameter is concatenated with the image `patch`es to form a `197×768` token matrix. Positional embedding is then added before the matrix enters the `Transformer encoder`, which produces a `197×768` output. Token 0 (the final `CLS` output) is extracted and passed to the classification head to produce **logits**.
+The learnable `CLS` token is concatenated with the image patches to form a `197×768` token matrix. Positional embedding is then added before the matrix enters the `Transformer Encoder`, which produces a `197×768` output. Token 0 (the final `CLS` output) is extracted and passed to the classification head to produce **logits**.
 
-![alt text](/img/cv_img/ViTimg/image-3.png)
+![CLS token and image-classification training flow](/img/cv_img/ViTimg/image-3.png)
 
 > The `cls token` is concatenated with 196 patch vectors to form 197 vectors. Positional embedding is added before entering the Transformer Encoder. The classification head produces logits; the cross-entropy loss function then compares these logits with the ground-truth class label, and backpropagation updates the trainable parameters.
 
@@ -61,29 +61,29 @@ The `CLS` parameter is concatenated with the image `patch`es to form a `197×768
 
 Before being passed into the **Transformer Encoder**, a positional embedding is added. In the original ViT, this is a learnable **absolute 1-D positional embedding**: one learned vector for each position in the flattened token sequence.
 
-![alt text](/img/cv_img/ViTimg/image-4.png)
+![Adding positional embeddings to the token sequence](/img/cv_img/ViTimg/image-4.png)
 
 > Each of the 197 token embeddings is added to its corresponding positional encoding, forming a token with positional information before being sent to the Transformer Encoder.
 
 The original paper compares no positional embedding, one-dimensional positional embedding, two-dimensional positional embedding, and relative positional embedding. The learned one-dimensional embedding performs best in that paper's specific ablation, but this is **not a universal rule**; many later ViTs use 2-D, relative, or RoPE-style positional methods.
 
-![alt text](/img/cv_img/ViTimg/image-5.png)
+![Ablation comparison of positional embedding choices](/img/cv_img/ViTimg/image-5.png)
 
 > Experimental comparison of No Pos. Emb., 1-D Pos. Emb., 2-D Pos. Emb., and Rel. Pos. Emb.
 
 ## Transformer Encoder
 
-![alt text](/img/cv_img/ViTimg/image-6.png)
+![Pre-LayerNorm Transformer encoder block](/img/cv_img/ViTimg/image-6.png)
 
 > Transformer Encoder architecture: Norm, Multi-Head Attention, residual connection, Norm, MLP, and another residual connection, repeated `L×`.
 
 ## Multi-head Attention
 
-![alt text](/img/cv_img/ViTimg/image-7.png)
+![Scaled dot-product and multi-head attention overview](/img/cv_img/ViTimg/image-7.png)
 
 > Architecture of Scaled Dot-Product Attention and Multi-Head Attention, including Q, K, V, MatMul, Scale, optional Mask, SoftMax, Concat, and Linear. Standard ViT encoder attention is **unmasked**; the optional mask belongs to the generic Transformer diagram.
 
-![alt text](/img/cv_img/ViTimg/image-8.png)
+![Per-head QKV attention computation and output projection](/img/cv_img/ViTimg/image-8.png)
 
 > Multi-head attention computation: each head uses $W^q$, $W^k$, and $W^v$ to obtain Q, K, and V. The attention outputs are concatenated and mapped through $W_o$.
 
@@ -91,7 +91,7 @@ Different heads can learn different relationships between tokens, although this 
 
 ### At the Code Level
 
-![alt text](/img/cv_img/ViTimg/image-9.png)
+![Tensor shapes in a multi-head attention implementation](/img/cv_img/ViTimg/image-9.png)
 
 > The `197×768` token matrix is linearly mapped to Q, K, and V, then split into multiple attention heads. The diagram uses 8 heads of dimension 96 (`8×96 = 768`) as a generic example. **Original ViT-B/16 instead uses 12 heads of dimension 64.** Each head computes its attention output `Z`; all head outputs are concatenated and then mapped once by the output projection $W_o$.
 
@@ -99,7 +99,7 @@ In code, Q, K, and V are commonly produced by one fused linear layer and then re
 
 ## MLP (Feedforward Neural Network)
 
-![alt text](/img/cv_img/ViTimg/image-10.png)
+![ViT feedforward MLP dimensions](/img/cv_img/ViTimg/image-10.png)
 
 > MLP architecture: `197*768 → Linear → 197*3072 → GELU → Dropout → Linear → 197*768 → Dropout`.
 

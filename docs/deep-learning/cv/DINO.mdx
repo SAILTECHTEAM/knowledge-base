@@ -83,7 +83,7 @@ Its main observations were:
 1. The last-layer `[CLS]` self-attention maps of self-supervised ViTs often align with salient objects and their boundaries, despite receiving no segmentation labels.
 2. Frozen DINO features work well with a simple weighted k-nearest-neighbor classifier. ViT-S/8 reached **78.3% ImageNet top-1 accuracy** without fine-tuning, a learned linear classifier, or test-time data augmentation.
 
-![DINO attention maps showing object regions](/img/cv_img/DINOimg/image-1.png)
+![DINO attention maps showing object regions](/img/cv_img/DINOimg/image.png)
 
 > Attention maps can reveal object-like regions, but this does not mean that DINO directly performs semantic segmentation or assigns class names. A downstream method is still needed to turn features or attention into task-specific predictions.
 
