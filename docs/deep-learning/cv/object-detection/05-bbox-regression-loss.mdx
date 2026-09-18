@@ -1,0 +1,250 @@
+---
+sidebar_position: 6
+title: "Deconstructing Object Detection (4) Box Representation and Regression Loss"
+description: "Localization supervision from independent coordinate losses to IoU geometry losses to DFL distribution modeling: training objectives converging step by step onto evaluation metrics."
+---
+
+# Deconstructing Object Detection (4): Box Representation and Regression Loss
+
+Evaluation metrics inspect predicted-versus-true region overlap, while early training losses computed only per-edge value gaps. When predicted and true boxes are fully disjoint, coordinate gaps persist while IoU is already zero. For small objects, a $2$-pixel single-edge shift takes an eighth of its width; for large objects, the same $2$-pixel shift barely touches the overlap ratio.
+
+Evaluation inspects predicted-versus-true region overlap, yet training that computes only four edge-value gaps optimizes against its own yardstick. Localization in detection kept correcting this training-evaluation deviation, ultimately pushing boundary representation from single-point estimation to probability-distribution modeling.
+
+## Geometric parameterization: absolute pixels to relative space
+
+In computer vision, a horizontal rectangle's rawest image-space form is absolute pixel coordinates — usually corner vertices $(x_1, y_1, x_2, y_2)$ or center-plus-size $(c_x, c_y, w, h)$. On $640\times 640$ inputs these values fall in $[0, 640]$.
+
+Asking a network's linear output layer to regress absolute pixels directly is numerically unstable. One image can hold hundred-pixel-spanning large objects alongside dozen-pixel small ones: large-object regression errors reach tens to hundreds in absolute value while small-object errors sit at fractions. Backpropagation lets large-object gradients dominate small ones, handing weight updates to large-object control. To make predictions comparable across scales, boxes need dimensionless, relatively reconstructed parameterization.
+
+### Relative transforms under anchors
+
+In anchor-based systems, each prediction position presets benchmark boxes of fixed sizes. With prior center/size $(x_a, y_a, w_a, h_a)$ and truth $(x_{gt}, y_{gt}, w_{gt}, h_{gt})$, the network predicts a four-dimensional offset vector $\boldsymbol{t} = (t_x, t_y, t_w, t_h)$ instead of absolute borders.
+
+Mathematically:
+
+$$
+\begin{aligned}
+t_x &= \frac{x_{gt} - x_a}{w_a}, \quad &t_y = \frac{y_{gt} - y_a}{h_a} \\
+t_w &= \ln\left(\frac{w_{gt}}{w_a}\right), \quad &t_h = \ln\left(\frac{h_{gt}}{h_a}\right)
+\end{aligned}
+$$
+
+The inverse transform recovering predicted coordinates $(\hat{x}, \hat{y}, \hat{w}, \hat{h})$ from network output $\boldsymbol{t}$:
+
+$$
+\begin{aligned}
+\hat{x} &= x_a + w_a \cdot t_x, \quad &\hat{y} = y_a + h_a \cdot t_y \\
+\hat{w} &= w_a \cdot \exp(t_w), \quad &\hat{h} = h_a \cdot \exp(t_h)
+\end{aligned}
+$$
+
+Two considerations sit inside these formulas:
+
+1. **Scale-normalized center shifts**: $t_x$ and $t_y$ measure relative center offsets divided by the prior's own $w_a$ and $h_a$. Whatever the object size, equal relative shifts land $t_x, t_y$ in the same magnitude band (usually near $[-0.5, 0.5]$), ending large objects' positional gradient dominance.
+2. **Logarithmic nonlinear width/height mapping**: log-transforming size ratios $\ln(w / w_a)$ first guarantees inverse-transformed sizes via $\exp(t_w)$ stay positive — no negative dimensions. Second, it converts nonlinear multiplicative relationships into linear additive gaps. A truth twice the prior gives $t_w = \ln 2 \approx 0.693$; half gives $t_w = \ln 0.5 \approx -0.693$. Expansion and shrinkage penalties symmetrize in log domain, bounding extreme-ratio gradient shocks.
+
+### Pixel-to-four-edge distance representation
+
+As anchor-free detection spread, box parameterization moved from preset-shape offsets to distance representations rooted directly at feature-point geometry. Part 1 covers multi-scale grid-point prediction mechanics; see [prediction carriers](./prediction-carrier).
+
+For a sampling point projecting to image coordinates $(p_x, p_y)$ that falls inside some true box $[x_1, y_1, x_2, y_2]$, the head assigns the distance vector $\boldsymbol{d} = (l, t, r, b)$ to the four borders:
+
+$$
+\begin{aligned}
+l &= p_x - x_1, \quad &t = p_y - y_1 \\
+r &= x_2 - p_x, \quad &b = y_2 - p_y
+\end{aligned}
+$$
+
+Take a $16\times 16$ small object with image borders $[x_1=500, y_1=100, x_2=516, y_2=116]$. A prediction point mapping to $(508, 108)$ — dead center — owns the true distance vector $(l=8, t=8, r=8, b=8)$.
+
+The representation drops all prior-box hyperparameters. Heads emit four nonnegative scalars; simple addition and subtraction recover absolute predicted borders:
+
+$$
+\begin{aligned}
+\hat{x}_1 &= p_x - \hat{l}, \quad &\hat{y}_1 = p_y - \hat{t} \\
+\hat{x}_2 &= p_x + \hat{r}, \quad &\hat{y}_2 = p_y + \hat{b}
+\end{aligned}
+$$
+
+Parameterization unifies numeric scales and establishes geometric mapping. It only solves value encoding and decoding. How deviation between predictions and labels should be measured is localization optimization's core question.
+
+## The independent-coordinate-loss defect: $L_1$ decoupled from overlap
+
+Early deep-learning practice borrowed standard regression handling for box localization, applying $L_1$, Smooth $L_1$, or mean-squared ($L_2$) losses independently per coordinate component.
+
+Smooth $L_1$ and the total four-coordinate localization loss:
+
+$$
+\begin{aligned}
+\mathrm{Smooth}_{L_1}(x) &= \begin{cases}
+0.5 x^2 & |x| < 1 \\
+|x| - 0.5 & \text{otherwise}
+\end{cases} \\
+\mathcal{L}_{\mathrm{coord}} &= \sum_{i \in \{l, t, r, b\}} \mathrm{Smooth}_{L_1}\bigl(\hat{d}_i - d_i\bigr)
+\end{aligned}
+$$
+
+Splitting boxes into four independently penalized variables is geometrically defective by birth.
+
+### Scale-blind geometric sensitivity
+
+Box quality never depends on single-coordinate absolute deviation but on deviation relative to the object's own size.
+
+Consider two objects of clearly different scales:
+
+1. A $16\times 16$ small object with truth $(8, 8, 8, 8)$. If the network predicts left distance $\hat{l} = 4$ with the other three sides exact, single-edge error is $4$ pixels and total absolute coordinate error is $4$ pixels. But horizontal span shrinks from $16$ to $12$ pixels, and IoU falls from $1.0$ to $0.75$.
+2. A $200\times 100$-pixel large object with truth $(50, 100, 50, 100)$. The same $4$-pixel left-distance miss ($\hat{l} = 46$) produces the identical $4$-pixel total error and the identical Smooth $L_1$ penalty as the small object. Yet against $100$-pixel width, $4$ pixels indent only $4\%$, leaving IoU still above $0.96$.
+
+Independent coordinate losses cannot see size. Identical absolute pixel misses visibly deform small objects morphologically and merely perturb large ones. Relative parameterization mitigates this only through static prior-to-object scale matching — never by directly linking loss to overlap.
+
+### Isolated four-component optimization breaks geometric coupling
+
+A rectangle's shape is jointly decided by four coupled components; naive summation ignores correlations between edge errors.
+
+For a $20\times 20$ true box:
+
+- Case A: center shift pushes both side edges $2$ pixels the same direction ($\Delta l = +2, \Delta r = -2$), total $L_1$ error $4$ pixels. Rigid translation keeps overlap large and IoU high.
+- Case B: all four edges shrink inward $1$ pixel each ($\Delta l = -1, \Delta t = -1, \Delta r = -1, \Delta b = -1$), total $L_1$ error also $4$ pixels. But length and width shrink together, area falling 400 to 324, IoU dropping plainly.
+
+Independent coordinate losses penalize both identically — equal summed absolute component gaps. Yet detection quality (mAP) stands entirely on IoU thresholds. Training strains to lower four algebraic residuals while testing inspects 2D rectangle overlap areas. The deviation pushes researchers toward geometry losses built directly on IoU.
+
+## The IoU loss family: whole overlap to geometric penalties
+
+Killing scale sensitivity and component mismatch at the root means optimizing the predicted box as one indivisible geometric whole.
+
+With true region $B^{gt}$ and predicted region $B$, intersection area $|B \cap B^{gt}|$ and union area $|B \cup B^{gt}|$, IoU is their ratio:
+
+$$
+\mathrm{IoU} = \frac{|B \cap B^{gt}|}{|B \cup B^{gt}|}
+$$
+
+IoU owns excellent mathematics: strictly bounded in $[0, 1]$ with scale invariance. Whether object edge length is $16$ or $200$ pixels, identical spatial coincidence ratios share identical IoU.
+
+The most direct loss is $\mathcal{L}_{\mathrm{IoU}} = 1 - \mathrm{IoU}$: zero at perfect coincidence, rising linearly as overlap falls.
+
+But basic IoU loss carries a plain mathematical defect: **vanishing gradients at zero intersection**.
+
+:::caution[IoU loss gradient death]
+When predicted box $B$ and truth $B^{gt}$ are fully disjoint, $|B \cap B^{gt}| = 0$, so $\mathrm{IoU} = 0$ and loss pins at $\mathcal{L}_{\mathrm{IoU}} = 1$. Every prediction-parameter partial derivative is zero; backpropagation offers no usable gradient. Early in training, or when deep grids predict distant objects, predictions easily detach from truths entirely — and optimization stalls outright.
+:::
+
+Later work injected geometric penalty terms into IoU to restore vanishing gradients.
+
+### GIoU: minimum closure and gap penalty
+
+To fix zero derivatives on disjoint boxes, Generalized IoU (GIoU) introduces the **minimum enclosing rectangle** (the smallest convex closure $C$ containing both $B$ and $B^{gt}$):
+
+$$
+\mathrm{GIoU} = \mathrm{IoU} - \frac{|C \setminus (B \cup B^{gt})|}{|C|}
+$$
+
+with loss $\mathcal{L}_{\mathrm{GIoU}} = 1 - \mathrm{GIoU}$. The extra term measures the **gap-area ratio** inside the jointly decided minimum closure $C$ belonging to neither box.
+
+For fully disjoint boxes, $\mathrm{IoU} = 0$ and the formula degrades to $\mathrm{GIoU} = -\frac{|C| - |B| - |B^{gt}|}{|C|}$.
+
+GIoU then sits negative in $(-1, 0]$. Far-apart predictions inflate closure $C$ enormously, gap ratio approaches $1$, $\mathrm{GIoU} \to -1$, loss near $2$; as predictions approach truth, $C$ shrinks fast, gap ratio falls, loss follows. Since closure area $|C|$ derives directly from extreme coordinates of both boxes' outer borders, gradients still reach prediction heads in disjoint states, actively pushing predictions toward truths until overlap forms.
+
+GIoU still degenerates: when one box fully contains the other, their minimum closure $C$ equals the outer box itself. Then $|C| - |B \cup B^{gt}| = 0$, the extra penalty pins at zero, and the formula collapses to plain IoU. Inside such containment, inner-box translations that stay in-bounds escape GIoU's center-drift perception.
+
+### Center-distance and shape penalties: DIoU and CIoU
+
+For containment degeneration, DIoU (Distance-IoU) bypasses closure gaps, pulling the two boxes' center Euclidean distance straight into the loss:
+
+$$
+\mathcal{L}_{\mathrm{DIoU}} = 1 - \mathrm{IoU} + \frac{\rho^2(b, b^{gt})}{c^2}
+$$
+
+where $b$ and $b^{gt}$ are predicted and true geometric centers, $\rho(\cdot)$ is Euclidean distance, and $c$ is the minimum-closure diagonal covering both boxes. DIoU's logic is direct: overlap or containment regardless, the center-distance term gravitates continuously, dragging predicted centers horizontally and vertically onto target centers.
+
+Later CIoU adds an aspect-ratio penalty atop DIoU: $\mathcal{L}_{\mathrm{CIoU}} = \mathcal{L}_{\mathrm{DIoU}} + \alpha v$ with $v = \frac{4}{\pi^2}\bigl(\arctan\frac{w^{gt}}{h^{gt}} - \arctan\frac{w}{h}\bigr)^2$ and balancing weight $\alpha$.
+
+One explicit verdict: CIoU constrains overlap area, center distance, and aspect ratio together, but its aspect-ratio term is limited. $v$ measures relative deviation of the width-height ratio ($\frac{w}{h}$), never independently constraining absolute width and height scales — proportionally co-scaled boxes keep the ratio and defeat the penalty. Inverse-trigonometric functions also lengthen the derivative chain; in practice the aspect-ratio term's effective gradient contribution stays marginal and never became localization optimization's main line.
+
+From Smooth $L_1$ through GIoU and DIoU, this stage firmly established IoU-geometry-led box regression. Yet all these geometric losses share one substrate premise: every box border is a spatially certain single point (Dirac delta distribution), with the network emitting exact continuous values.
+
+Real visual data routinely breaks the determinism assumption.
+
+## Border uncertainty: point estimates to distribution modeling
+
+In mutually occluding object scenes, one object's partial contours may hide behind another. Even trained annotators disagree by pixels on whether occluded borders belong inside visible contours or extrapolated to possibly complete ones. Around small objects, lens depth-of-field and color-transition effects weave object edges into background as smooth-transition pixel bands.
+
+In such scenes, true object borders are not mathematically infinitely sharp lines. Fuzziness is native.
+
+Forcing deterministic network outputs makes the network commit singly inside fuzzy zones, oscillating between contradictory edge features. DFL (Distribution Focal Loss) changes the point-estimate approach, recasting border regression as probability-distribution prediction.
+
+### DFL: discrete-interval distribution representation
+
+DFL stops predicting a continuous distance scalar $y$ directly. Instead it discretizes the continuous regression range into fixed-interval discrete values (bins).
+
+With maximum regression distance $y_{\max}$, the system evenly divides it into integer points $\mathcal{S} = \{0, 1, 2, \dots, n\}$. For any edge's distance prediction, the network emits not one scalar but unnormalized log-probability logits over discrete set $\mathcal{S}$. Softmax converts them into the edge's positional probability distribution $\boldsymbol{P} = (p_0, p_1, \dots, p_n)$ with $\sum_{i=0}^n p_i = 1$.
+
+The restored continuous distance estimate $\hat{y}$ is the distribution's **expectation** over discrete support:
+
+$$
+\hat{y} = \sum_{i=0}^n i \cdot p_i
+$$
+
+The design's character: discrete probability distributions model border uncertainty inside the network, while outward it still emits one continuous differentiable expectation scalar $\hat{y}$ — pluggable into IoU, GIoU, and other geometric losses for end-to-end training directly.
+
+```text title="Point estimation versus distribution regression"
+Continuous regression (point estimate):
+True y=7.3 ────> [ network emits single scalar: 7.3 ] ────> border fuzziness inexpressible
+
+Distribution regression (DFL discrete distribution):
+True y=7.3 ────> discrete bins: [0, 1, 2, 3, 4, 5, 6, 7, 8, ... , n]
+                                           │  │
+                                target weights: 0.7 0.3
+                                           ▼  ▼
+                               network emits: [p0, p1, ... p7, p8, ... pn]
+                                           │
+                                           ▼ expectation
+                               restored: y_hat = Σ (i * p_i)
+```
+
+For supervision signals, when an edge's continuous true distance $y$ falls between adjacent integer indices $y_i$ and $y_{i+1}$ ($y_i \le y < y_{i+1}$, $y_{i+1} = y_i + 1$), DFL skips rounding to an integer and linearly splits supervision mass onto the two nearest bins:
+
+- discrete position $y_i$ receives target probability $y_{i+1} - y$;
+- discrete position $y_{i+1}$ receives $y - y_i$.
+
+With true distance $y = 7.3$ — between bins 7 and 8 — bin 7 gets target weight $8 - 7.3 = 0.7$ and bin 8 gets $7.3 - 7 = 0.3$.
+
+DFL loss runs cross-entropy against exactly those two neighboring bins:
+
+$$
+\mathcal{L}_{\mathrm{DFL}}(p_i, p_{i+1}) = -\bigl((y_{i+1} - y)\ln(p_i) + (y - y_i)\ln(p_{i+1})\bigr)
+$$
+
+The $y = 7.3$ example above is $-\bigl(0.7 \ln(p_7) + 0.3 \ln(p_8)\bigr)$.
+
+:::tip[Two consequences of DFL supervision]
+First, distribution shape reflects border confidence: sharp, clean-contour borders concentrate predicted mass into a sharp peak near truth; occluded or fuzzy-transition borders spontaneously flatten or bimodalize — distribution variance directly expresses the network's geometric position uncertainty. Second, probability-mass range is bounded: DFL constrains cross-entropy to the two bins nearest truth, forcing all probability mass into truth's local neighborhood so far-off discrete points cannot drag the expectation during backpropagation.
+:::
+
+### FDR: refined distribution regression
+
+Under DFL, bin partitions are fixed and uniform (usually step $1$, range $0$–$16$). Uniform partitioning serves common objects stably but bottlenecks on precision-versus-compute balance: denser bins for sub-pixel precision visibly multiply head channels; coarse bins cap expectation interpolation precision.
+
+D-FINE answers with Fine-grained Distribution Refinement (FDR).
+
+FDR's core judgment: **border-distribution estimation should never complete one-shot on coarse uniform grids across all levels, but refine progressively along network depth.**
+
+At shallow or initial stages, the network predicts a coarse discrete distribution over the border's rough range, locking the base integer interval; as features enter finer prediction stages, later layers stop re-predicting the whole large-range global distribution and instead predict a higher-resolution, narrower local refinement distribution around the previously predicted center for local residuals.
+
+Decomposing global large-range discrete distributions into coarse-localization plus layer-wise residual-refinement distributions, FDR pushes border probability representation to higher spatial resolution without greatly growing total bin counts. Layer-progressive refined distribution modeling represents the current deepening direction of border-uncertainty modeling.
+
+## After box supervision: classification–localization separation
+
+Box representation and loss supervision now form a complete pipeline:
+
+From gradient-imbalancing absolute pixels to scale-erasing relative parameterization; from geometry-splitting Smooth $L_1$ detached from evaluation metrics to whole-binding, scale-invariant IoU-series geometric losses; to DFL and layer-refined distributions (FDR) probabilistically modeling border fuzziness past deterministic point-estimate assumptions. Localization losses let networks hug predicted boxes onto object edges in training the way evaluation actually measures.
+
+Yet on any single feature map, a complete detection prediction carries class predictions alongside positional geometry.
+
+Even with every position's border regression optimized well, one structural problem remains: **the branch predicting box geometric quality and the branch predicting object class stay largely mutually isolated.**
+
+In one concrete forward result, a feature position far from an object center may observe only the object's local textures, prompting a rash $0.95$ classification confidence from the classification head; but sitting on the object edge without global contour information, its regressed box quality is poor — IoU $0.3$ with the true object. Conversely, another position in the object's core region predicts an exquisite IoU-$0.90$ box yet scores only $0.60$ classification confidence under local lighting or texture variation.
+
+Entering post-processing, traditional systems trust the $0.95$ score first, directly suppressing the low-confidence but high-precision prediction.
+
+Localization losses solved how to compute boxes accurately but cannot solve how networks express prediction-box accuracy. The mismatch between classification scores and true box geometric quality became the main barrier to further detection gains. Analyzing and resolving it belongs to [Part 5: Classification Confidence and Detection Heads](./classification-head).
