@@ -45,7 +45,7 @@ The same convolution weights are shared across every patch location. The result 
 
 ## Classification Token (cls token)
 
-1. Randomly initialize the `cls` parameter with the same dimension as the model input (`1*768`).
+1. Randomly initialize the `CLS` parameter with the same dimension as a token embedding (`1×768`).
 2. Each `batch` copies the same `cls token`. A `batch` is the number of images processed at the same time. For example, `batch=32` means processing 32 images simultaneously, calculating 32 `loss` values, and taking their average for backpropagation.
 3. Update the parameter through backpropagation.
 
