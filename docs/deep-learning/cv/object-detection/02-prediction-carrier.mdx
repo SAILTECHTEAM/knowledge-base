@@ -8,7 +8,7 @@ description: "Three paradigm shifts in prediction carriers: naive grids, anchor 
 
 After backbone feature extraction, a detection network's outputs must solidify into a batch of candidate entities. The **prediction carrier** is the basic representational carrier that forward propagation emits directly — before any non-maximum suppression (NMS) or threshold filtering.
 
-The carrier decides the whole system's input-output protocol. It bounds how many candidate slots a single image can hold, defines each slot's physical geometric meaning, and determines whether the model can handle overlap, occlusion, and multi-scale objects. If the carrier has dead zones in spatial resolution or geometric capacity, no downstream feature extraction or loss design can recover the missed or confused detections.
+The carrier decides the whole system's input-output protocol. It bounds how many candidate units a single image can hold, defines each unit's physical geometric meaning, and determines whether the model can handle overlap, occlusion, and multi-scale objects. If the carrier has dead zones in spatial resolution or geometric capacity, no downstream feature extraction or loss design can recover the missed or confused detections.
 
 Across detection history, carrier evolution was never linear performance scaling. It is a history organized around two axes: **handcrafted geometric priors** versus **unbinding from spatial coordinates**.
 
@@ -25,22 +25,22 @@ $$
 - $\mathbf{p}_{\text{cls}} \in \mathbb{R}^{C}$ is the cell-shared conditional class probability distribution.
 - Each cell may emit $B$ candidate boxes ($B=2$ in the original setting), each a confidence scalar $c_b$ plus dimensionless coordinates $(x_b, y_b, w_b, h_b)$ offset from the cell's top-left corner.
 
-YOLOv1 mapped prediction slots to image space in the most direct way possible — essentially the earliest dense anchor-free attempt. But naive grid binding hit a structural bottleneck immediately:
+YOLOv1 mapped prediction units to image space in the most direct way possible — essentially the earliest dense anchor-free attempt. But naive grid binding hit a structural bottleneck immediately:
 
 1. **Overlapping objects are inexpressible**: the whole class distribution $\mathbf{p}_{\text{cls}}$ is shared inside a cell, and the design assumes one cell serves one center. When two objects occlude each other with centers projected into the same cell, the network physically cannot emit two independent entities. During training the two boxes fight over one ground-truth assignment, producing misses or a forced malformed giant box.
 2. **No geometric scale prior makes convergence hard**: with nothing to anchor on, fitting absolute sizes spanning orders of magnitude from scratch sends optimization into violent oscillation.
 
 :::caution[The YOLOv1 lesson]
-A single prediction slot per discrete spatial grid fundamentally cannot carry multi-object overlap and dense layouts. The network needs parallel multi-slot expression at the same spatial position, plus a more stable scale baseline for optimization.
+A single prediction unit per discrete spatial grid fundamentally cannot carry multi-object overlap and dense layouts. The network needs parallel multi-unit expression at the same spatial position, plus a more stable scale baseline for optimization.
 :::
 
 ## Paradigm 1: Anchor-based geometric templates
 
-To safely multiply prediction slots inside the network, Faster R-CNN invented the Region Proposal Network (RPN) and put **anchors** on the historical stage. SSD, RetinaNet, and YOLOv2/v3 followed, establishing anchor dominance for years.
+To safely multiply prediction units inside the network, Faster R-CNN invented the Region Proposal Network (RPN) and put **anchors** on the historical stage. SSD, RetinaNet, and YOLOv2/v3 followed, establishing anchor dominance for years.
 
 ### Mechanism
 
-The anchor idea abandons asking the network to guess absolute object sizes. Instead, every spatial sampling point of the feature map is pre-tiled with rigid geometric templates of different sizes and aspect ratios. With $K$ presets per location, that location instantly gains $K$ parallel prediction slots.
+The anchor idea abandons asking the network to guess absolute object sizes. Instead, every spatial sampling point of the feature map is pre-tiled with rigid geometric templates of different sizes and aspect ratios. With $K$ presets per location, that location instantly gains $K$ parallel prediction units.
 
 On a feature map of stride $s$, at position $(i, j)$ the network places prior rectangles $\mathcal{A}_{i,j} = \{ (x_a^k, y_a^k, w_a^k, h_a^k) \}_{k=1}^K$ at the corresponding image center. For each anchor $k$ it emits dimensionless relative transform offsets $\mathbf{t} = (t_x, t_y, t_w, t_h)$, decoded into predicted boxes through the standard geometric inverse transform:
 
@@ -57,7 +57,7 @@ One feature point can now stack a tall template (e.g. $1:2$) alongside a square 
 
 Anchors trade handcrafted priors for capacity and training stability, at a heavy price:
 
-- **Slot combinatorics and extreme sample imbalance**: on a $640\times 640$ image with stride-8/16/32 feature maps, spatial points total $80\times 80 + 40\times 40 + 20\times 20 = 8400$. Nine anchors per point generate $8400 \times 9 = 75600$ candidate units, while a typical image holds only a handful of real objects — over $99.9\%$ of slots are pure background negatives. The imbalance forces harsh online sampling (e.g. OHEM) or redesigned classification losses (e.g. Focal Loss).
+- **Unit combinatorics and extreme sample imbalance**: on a $640\times 640$ image with stride-8/16/32 feature maps, spatial points total $80\times 80 + 40\times 40 + 20\times 20 = 8400$. Nine anchors per point generate $8400 \times 9 = 75600$ candidate units, while a typical image holds only a handful of real objects — over $99.9\%$ of units are pure background negatives. The imbalance forces harsh online sampling (e.g. OHEM) or redesigned classification losses (e.g. Focal Loss).
 - **Brittle handcrafted hyperparameters**: anchor sizes and aspect ratios are hard-coded. If engineers set the smallest anchor to $32\times 32$ pixels for a generic dataset, tiny or extreme-aspect-ratio distant objects overlap no prior well. The network must predict huge negative $t_w, t_h$ offsets to pull sizes back, inviting gradient oscillation.
 
 ### In-architecture remedies
@@ -76,7 +76,7 @@ Modern anchor-free detectors — FCOS, CenterNet — cut carriers back down to *
 
 ### Mechanism
 
-In point-regression systems, every valid pixel $(x, y)$ of the feature map is itself a template-free observation post, mapped to the input-image sampling center:
+In point-regression systems, every valid pixel $(x, y)$ of the feature map is itself a template-free prediction unit, mapped to the input-image sampling center:
 
 $$
 \big(x_{\text{orig}}, y_{\text{orig}}\big) = \left( x \cdot s + \left\lfloor \frac{s}{2} \right\rfloor, \; y \cdot s + \left\lfloor \frac{s}{2} \right\rfloor \right)
@@ -86,7 +86,7 @@ Instead of scale-shift relative to templates, the network emits a four-dimension
 
 CenterNet goes further: rather than regressing from every interior point, it collapses carriers onto geometric center extrema, locating object centers through heatmap Gaussian peaks and emitting continuous sizes $(w, h)$ directly at each peak.
 
-Point regression compresses each feature point's slots to exactly 1. Total candidates across a three-level pyramid drop from 75,600 to 8,400, with zero anchor size/ratio hyperparameters.
+Point regression compresses each feature point's units to exactly 1. Total candidates across a three-level pyramid drop from 75,600 to 8,400, with zero anchor size/ratio hyperparameters.
 
 ### Inherent costs
 
@@ -120,23 +120,23 @@ To break "spatial-grid hostage-taking" and NMS dependence together, DETR propose
 
 ### Mechanism
 
-DETR severs the hard mapping between prediction slots and input pixel coordinates, declaring upfront a fixed-capacity learnable vector set:
+DETR severs the hard mapping between prediction units and input pixel coordinates, declaring upfront a fixed-capacity learnable vector set:
 
 $$
 \mathcal{Q} = \{ \mathbf{q}_1, \mathbf{q}_2, \dots, \mathbf{q}_N \}, \quad \mathbf{q}_n \in \mathbb{R}^{d}
 $$
 
-Typically $N=300$ (or $100$). At initialization these are just static embeddings in a parameter matrix — no image coordinates, no size limits. They are $N$ globally sighted **abstract entity slots**.
+Typically $N=300$ (or $100$). At initialization these are just static embeddings in a parameter matrix — no image coordinates, no size limits. They are $N$ globally sighted **abstract entity units**.
 
-Fed as a whole into the Transformer decoder, the $N$ queries interact through multi-layer cross-attention with flattened full-image features. Each slot independently feeds a feed-forward network emitting unconstrained globally normalized coordinates $(c_x, c_y, w, h)$ plus a class distribution including the background empty class $\varnothing$.
+Fed as a whole into the Transformer decoder, the $N$ queries interact through multi-layer cross-attention with flattened full-image features. Each unit independently feeds a feed-forward network emitting unconstrained globally normalized coordinates $(c_x, c_y, w, h)$ plus a class distribution including the background empty class $\varnothing$.
 
-For losses, DETR introduces Hungarian **bipartite matching**: each ground-truth object is forcibly matched to exactly one best prediction among all $N$ slots; unmatched slots are supervised as background $\varnothing$.
+For losses, DETR introduces Hungarian **bipartite matching**: each ground-truth object is forcibly matched to exactly one best prediction among all $N$ units; unmatched units are supervised as background $\varnothing$.
 
 The design is theoretically pure:
 
-- Slots are not decided by "which pixel grid the object lands on";
-- slots communicate and sense each other through self-attention;
-- if slot 1 locks a target, slot 2 steers away on its own — **natural one-to-one entity prediction with no NMS**.
+- Units are not decided by "which pixel grid the object lands on";
+- units communicate and sense each other through self-attention;
+- if unit 1 locks a target, unit 2 steers away on its own — **natural one-to-one entity prediction with no NMS**.
 
 ### Inherent costs
 
@@ -154,10 +154,10 @@ Pure global queries' slow convergence forced a realization: **discarding spatial
 
 ## Evolution: three rounds and a closed loop
 
-| Paradigm | Representative models | Total slots | Slot–pixel relation | Main cost | In-architecture remedy |
+| Paradigm | Representative models | Total units | Unit–pixel relation | Main cost | In-architecture remedy |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Naive grid / early anchor-free** | YOLOv1 | Very few (hundreds) | Strongly bound (one grid owns one object) | Overlap capacity lockup; scale-prior-free regression diverges | No direct fix; pushed the field toward template expansion |
-| **Prior-template (anchor-based)** | Faster R-CNN (RPN), SSD, YOLOv3 | Huge (tens of thousands to hundreds of thousands) | Strongly bound (multiple geometric templates per grid center) | Slot combinatorics; $99.9\%$ pos/neg imbalance; hypersensitive size-ratio priors | K-means distribution fitting; FPN cross-level shunting; ATSS dynamic matching relaxation |
+| **Prior-template (anchor-based)** | Faster R-CNN (RPN), SSD, YOLOv3 | Huge (tens of thousands to hundreds of thousands) | Strongly bound (multiple geometric templates per grid center) | Unit combinatorics; $99.9\%$ pos/neg imbalance; hypersensitive size-ratio priors | K-means distribution fitting; FPN cross-level shunting; ATSS dynamic matching relaxation |
 | **Modern point-based (dense anchor-free)** | FCOS, CenterNet, YOLOv8 | Medium (thousands) | Strongly bound (pixels measure outward directly) | Overlap-region semantic conflict; low-quality far-from-center edge boxes | FPN max-distance scale decoupling; centerness quality suppression; center-sampling shrinkage |
 | **Set-query (query-based)** | DETR, Deformable DETR | Very few (100–300) | **Fully unbound** (global self-attention interaction) | Missing local spatial priors; extremely slow convergence; small-object attention dilution | 2D reference-point binding; position/content decoupling; reintroduced continuous spatial priors |
 
