@@ -1,0 +1,282 @@
+---
+title: "DINO Series"
+description: "Conceptual notes on DINO, DINOv2, and DINOv3"
+---
+
+# DINO: From Self-Distillation to Vision Foundation Models
+
+> **Naming note:** This document describes Meta's self-supervised DINO family. It is unrelated to the object detector named **DINO** (*DETR with Improved DeNoising Anchor Boxes*).
+
+## DINO v1: Self-Distillation with No Labels
+
+### Self-supervised learning
+
+Self-supervised learning does not require manually assigned class labels. Instead, it creates a learning signal from the data itself. In DINO, differently augmented views of the same image are passed to a student and a teacher. The teacher's probability distribution becomes the student's soft target.
+
+Self-supervised objectives are often described as **contrastive** or **non-contrastive**, although this is a useful high-level grouping rather than an exhaustive taxonomy.
+
+#### Contrastive objectives
+
+A contrastive objective treats two augmented views of the same source image as a **positive pair** and views from other source images as **negative pairs**.
+
+For example:
+
+- Cat A₁ ↔ Cat A₂: positive pair
+- Cat B₁ ↔ Cat B₂: positive pair
+- Dog C₁ ↔ Dog C₂: positive pair
+- Cat A₁ ↔ Cat B₁: negative pair, even though both contain cats
+
+Training pulls representations of positive pairs closer and pushes representations of negative pairs apart. Negative pairs help prevent collapse, but they can contain **false negatives**: two different images that are semantically related but are nevertheless pushed apart.
+
+#### Non-contrastive objectives
+
+A non-contrastive method such as DINO does not explicitly push representations from different images apart. Instead, the student matches the teacher's output for another view of the same source image.
+
+Removing explicit negatives does **not** by itself prevent collapse. DINO relies on a combination of mechanisms:
+
+- a momentum teacher updated by exponential moving average (EMA);
+- stop-gradient through the teacher;
+- centering of the teacher logits;
+- sharpening through a low teacher temperature;
+- multi-crop training.
+
+The paper's ablations show that centering and sharpening, used together with the momentum teacher, are the key anti-collapse mechanism. EMA and stop-gradient alone should not be presented as a complete explanation.
+
+### What is model collapse?
+
+Model collapse happens when a self-supervised model finds a trivial shortcut: it produces nearly the same representation or output distribution for every input.
+
+For example:
+
+```text
+Cat image → [0.5, 0.5, 0.5]
+Dog image → [0.5, 0.5, 0.5]
+Car image → [0.5, 0.5, 0.5]
+```
+
+Although the inputs are different, their representations contain almost no distinguishing information. The features are therefore useless for downstream tasks such as classification, retrieval, or segmentation.
+
+This can happen when the learning objective only asks two augmented views of the same image to produce similar outputs. The model can satisfy that rule perfectly by returning one constant output for every image:
+
+```text
+Image A, view 1 → X
+Image A, view 2 → X  ✓
+
+Image B, view 1 → X
+Image B, view 2 → X  ✓
+```
+
+The training loss can be very low even though the model has learned nothing useful. This is why collapse is called a **trivial solution**.
+
+Contrastive learning prevents this by using negative pairs: representations of different images are pushed apart, so returning the same output for every image is penalized. DINO does not use explicit negative pairs. Instead, it prevents collapse through the combined effect of the momentum teacher, stop-gradient, centering, sharpening, and multi-crop training.
+
+### Supervised versus self-supervised learning
+
+In supervised learning, each input is paired with an externally supplied target, such as an image class or a translated sentence. In DINO pretraining, no semantic class label is supplied. The target is the teacher distribution produced from another view of the same image.
+
+### Motivation and emergent properties
+
+The original DINO work asked whether self-supervised pretraining could make Vision Transformers learn richer visual representations than ordinary image-level supervised training.
+
+Its main observations were:
+
+1. The last-layer `[CLS]` self-attention maps of self-supervised ViTs often align with salient objects and their boundaries, despite receiving no segmentation labels.
+2. Frozen DINO features work well with a simple weighted k-nearest-neighbor classifier. ViT-S/8 reached **78.3% ImageNet top-1 accuracy** without fine-tuning, a learned linear classifier, or test-time data augmentation.
+
+![DINO attention maps showing object regions](/img/cv_img/DINOimg/image-1.png)
+
+> Attention maps can reveal object-like regions, but this does not mean that DINO directly performs semantic segmentation or assigns class names. A downstream method is still needed to turn features or attention into task-specific predictions.
+
+## Core DINO Training Method
+
+### Teacher-student self-distillation
+
+![DINO teacher-student architecture](/img/cv_img/DINOimg/image-1.png)
+
+Both networks use the same architecture but have different parameters:
+
+1. Generate multiple augmented views of an image.
+2. Pass every view to the student, but only the two global views to the teacher.
+3. Convert both networks' logits into probability distributions with temperature-scaled softmax.
+4. Center and sharpen the teacher logits, then stop gradients through the teacher output.
+5. Minimize cross-entropy between the teacher distribution for one view and the student distribution for a different view. Matching the identical view is excluded.
+6. Update the student with gradient descent.
+7. Update the teacher with an EMA of the student weights.
+
+For a teacher view (x) and a different student view (x'), the loss contains
+
+$$
+H\left(P_t(x), P_s(x')\right).
+$$
+
+The teacher target is a **soft pseudo-target**, not ground truth in the conventional labeled-data sense.
+
+### Backbone and projection head
+
+The network is
+
+$$
+g = h \circ f,
+$$
+
+where (f) is the backbone and (h) is the DINO projection head. For a ViT, the head is applied to the final `[CLS]` token. In the commonly reported setup, the head maps the backbone representation to a high-dimensional output, often (K=65,536), before temperature softmax and cross-entropy.
+
+This output should not be interpreted as 65,536 semantic classes. It is a learned projection space used by the self-distillation objective. Downstream tasks normally use the backbone features, not the projection-head probabilities.
+
+### Multi-crop input
+
+![DINO multi-crop input](/img/cv_img/DINOimg/image-2.png)
+
+The standard setup creates:
+
+- two `224 × 224` global crops, sent to both student and teacher;
+- several `96 × 96` local crops, sent only to the student.
+
+This encourages **local-to-global correspondence**: the student must make a local crop agree with the teacher's broader view of the same image.
+
+### Momentum teacher (EMA)
+
+The teacher is initialized from the student and updated as
+
+$$
+\theta_t \leftarrow m\theta_t + (1-m)\theta_s,
+$$
+
+where the momentum (m) follows a cosine schedule from approximately `0.996` toward `1.0`.
+
+The teacher therefore represents a smoothed ensemble of recent student states and provides more stable targets. The teacher receives no gradient update.
+
+### Centering and sharpening
+
+Teacher probabilities are computed as
+
+$$
+P_t(x) = \operatorname{softmax}\left(\frac{g_t(x)-c}{\tau_t}\right),
+$$
+
+where (c) is an EMA center computed from teacher logits and (	au_t) is the teacher temperature.
+
+- **Centering** prevents one output dimension from dominating across the batch, but by itself tends toward a uniform output.
+- **Sharpening** uses a low temperature to reduce output entropy, but by itself can encourage collapse toward a very concentrated output.
+- **Together**, they balance these two failure modes.
+
+![DINO collapse ablation](/img/cv_img/DINOimg/image-3.png)
+
+Entropy alone is not a universal collapse detector. In this specific analysis, very high entropy is associated with uniform outputs, while very low entropy can indicate overly concentrated outputs. The right-hand plot uses teacher-student KL divergence; a rapid fall to zero can indicate both networks have converged to the same trivial output.
+
+## DINOv2
+
+DINOv2 scales the approach into a general-purpose visual feature extractor. Its training recipe combines image-level DINO self-distillation, patch-level iBOT masked-image modeling, KoLeo regularization, a curated dataset, training stabilizations, and model distillation.
+
+![DINOv2 training architecture](/img/cv_img/DINOimg/image-4.png)
+
+### Training objectives
+
+1. **DINO loss:** aligns the student and teacher `[CLS]` outputs across different views.
+2. **iBOT loss:** masks selected student patch tokens and asks their outputs to match the teacher's distributions for the corresponding unmasked patch tokens. It predicts teacher features/distributions, not RGB pixels.
+3. **KoLeo regularization:** encourages embeddings to spread out by penalizing small nearest-neighbor distances within a batch. It is better described as a feature-spreading or entropy regularizer than as simply making all vectors uniformly distributed.
+
+![DINOv2 loss functions](/img/cv_img/DINOimg/image-5.png)
+
+DINOv2 also adds four **register tokens** to reduce high-norm artifacts in patch-token feature maps.
+
+### High-resolution adaptation
+
+Near the end of pretraining, DINOv2 increases the input resolution from `224 × 224` to `518 × 518`, not `416 × 416`. This short high-resolution phase improves pixel-level tasks more cheaply than training at high resolution from the beginning.
+
+![DINOv2 resolution comparison](/img/cv_img/DINOimg/image-6.png)
+
+### Scaling the model
+
+- DINO v1 experiments included ViT-S and ViT-B; ViT-B has about **85–86M backbone parameters**.
+- DINOv2's largest teacher is ViT-g/14 with about **1.1B parameters**.
+- Smaller ViT-S/14, ViT-B/14, and ViT-L/14 models are distilled from the large teacher.
+
+### LVD-142M data curation
+
+The DINOv2 pipeline starts from roughly **1.2B uncurated images** and produces LVD-142M, a curated dataset of about **142M images**.
+
+The simplified process is:
+
+1. Build a curated seed set from several existing datasets and an uncurated web-image pool.
+2. Embed both pools with a pretrained self-supervised ViT-H/16.
+3. Deduplicate the uncurated pool.
+4. Use nearest-neighbor retrieval from the curated seed set into the uncurated pool.
+5. Sample retrieved images to form a diverse dataset whose visual distribution is guided by the curated sources.
+
+![LVD-142M data curation pipeline](/img/cv_img/DINOimg/image-7.png)
+
+This is **retrieval-based visual curation**, not ordinary supervised classification. The curated seed set defines which regions of visual feature space should be represented.
+
+### Distilling smaller models
+
+After training ViT-g/14, DINOv2 distills its representations into smaller models. This allows compact backbones to benefit from the large teacher's stronger features.
+
+![DINOv2 distillation results](/img/cv_img/DINOimg/image-8.png)
+
+## DINOv3
+
+DINOv3 further scales self-supervised visual pretraining and targets the degradation of dense patch features during very long training.
+
+### Scale
+
+- The largest ViT teacher has about **6.7B parameters**, commonly rounded to 7B.
+- The principal curated dataset, **LVD-1689M**, contains about **1.689B images**.
+- The paper describes training from a much larger raw pool. Avoid stating that all raw images came from Instagram unless the source explicitly supports that narrower claim.
+
+![DINOv2 and DINOv3 model comparison](/img/cv_img/DINOimg/image-9.png)
+
+### Dense-feature degradation
+
+During extended DINO-style training, image-level performance can keep improving while patch features become less spatially coherent, harming dense tasks such as segmentation and depth estimation. DINOv3 introduces **Gram anchoring** to preserve useful relationships among patch features.
+
+![DINOv3 dense-feature degradation](/img/cv_img/DINOimg/image-10.png)
+
+![DINOv3 patch-similarity evolution](/img/cv_img/DINOimg/image-11.png)
+
+### Gram anchoring
+
+Gram anchoring uses a frozen earlier model as a reference. It compares the pairwise similarities between patch features from the current student and corresponding features from the reference model.
+
+If (X_S) and (X_R) are normalized patch-feature matrices from the student and reference model, a simplified form is
+
+$$
+\mathcal{L}_{\text{Gram}}
+=
+\left\|X_SX_S^\top-X_RX_R^\top\right\|_F^2.
+$$
+
+Here, (X_SX_S^\top) and (X_RX_R^\top) are the **Gram matrices**. (X_S) and (X_R) themselves are feature matrices, not Gram matrices. Also, the anchor is a frozen reference model, not the current EMA teacher.
+
+The reference-stage objective can be summarized as
+
+$$
+\mathcal{L}_{\text{Ref}}
+=
+w_D\mathcal{L}_{\text{DINO}}
++\mathcal{L}_{\text{iBOT}}
++w_{DK}\mathcal{L}_{\text{DKoLeo}}
++w_G\mathcal{L}_{\text{Gram}}.
+$$
+
+Gram anchoring is applied as a later training stage rather than throughout the entire base pretraining run.
+
+### High-resolution Gram anchoring
+
+In high-resolution adaptation, the reference model processes high-resolution views. Its patch features are spatially pooled or downsampled to align with the student's lower-resolution token grid before computing the Gram loss. This provides a stronger spatial reference without requiring the full model to be trained at high resolution from the beginning.
+
+![DINOv3 Gram-anchoring results](/img/cv_img/DINOimg/image-12.png)
+
+## Version Summary
+
+| Version | Central idea | Important additions | Approximate largest ViT |
+| --- | --- | --- | --- |
+| DINO v1 | Non-contrastive teacher-student self-distillation | EMA teacher, centering, sharpening, multi-crop | ViT-B, 85–86M in the main ViT experiments |
+| DINOv2 | General-purpose visual features at scale | iBOT, KoLeo, register tokens, LVD-142M, distillation, high-resolution adaptation | ViT-g/14, ~1.1B |
+| DINOv3 | Scale plus preservation of dense features | LVD-1689M, ~7B ViT, Gram anchoring, high-resolution anchoring | ViT-7B, ~6.7B |
+
+## References
+
+- [Emerging Properties in Self-Supervised Vision Transformers (DINO)](https://arxiv.org/abs/2104.14294)
+- [DINOv2: Learning Robust Visual Features without Supervision](https://arxiv.org/abs/2304.07193)
+- [DINOv3](https://arxiv.org/abs/2508.10104)
