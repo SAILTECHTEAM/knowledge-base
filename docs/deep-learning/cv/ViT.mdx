@@ -1,0 +1,153 @@
+---
+title: "ViT (Vision Transformer)"
+description: "Vision Transformer architecture, training, and comparison with CNNs"
+---
+
+# ViT (Vision Transformer)
+
+**Encoder Only**
+
+![Overall Vision Transformer architecture](/img/cv_img/ViTimg/image.png)
+
+> Overall ViT architecture, including image patching, Linear Projection of Flattened Patches, Patch + Position Embedding, Transformer Encoder, MLP Head, and classification output.
+
+> **Configuration note:** The numerical examples below use **ViT-B/16**: `224×224` RGB input, `16×16` patches, 196 image patches, embedding dimension 768, 12 Transformer layers, 12 attention heads, and an MLP hidden dimension of 3072. Other ViT variants can use different values.
+
+## Input
+
+- **Image size:** `224*224*3`
+- **Patch size:** `16*16*3`
+- **Number of patches:** `196`
+
+Each patch contains `16×16×3 = 768` pixel values. It is flattened and then linearly projected into a 768-dimensional **patch embedding**. In the usual deep-learning layout, the image becomes a `196×768` matrix: 196 tokens, each with 768 features. (`768×196` is the same information written with the opposite matrix convention.)
+
+### Linear Projection of Flattened Patches
+
+The flattened patch vectors enter the **Linear Projection of Flattened Patches** (`z = xW + b`), producing the initial patch embeddings. This is not yet the final visual feature extraction; the Transformer encoder learns richer relationships among patches.
+
+![Splitting image patches and projecting them into tokens](/img/cv_img/ViTimg/image-1.png)
+
+> A `224*224*3` image is divided into 196 `16*16*3` patches. Each patch is flattened and mapped through a linear network to a 768-dimensional vector.
+
+### Using Convolution for Computation
+
+In implementation, convolution is used for the computation with:
+
+- A `16*16` `kernel` (because there are three `RGB` channels, its shape is `3*16*16`)
+- A stride of `16`
+- `768` convolution kernels (number of output channels), equivalent to applying one 768-output linear layer to each flattened patch
+
+The same convolution weights are shared across every patch location. The result is a `14×14×768` feature map, which is reshaped into a `196×768` token matrix.
+
+![Convolutional implementation of patch embedding](/img/cv_img/ViTimg/image-2.png)
+
+> Using 768 `16*16*3` convolution kernels with stride `S=16` and `P=0`, the output is `14*14*768` and is flattened into 196 vectors of 768 dimensions.
+
+## Classification Token (cls token)
+
+1. Randomly initialize the `cls` parameter with the same dimension as the model input (`1*768`).
+2. Each `batch` copies the same `cls token`. A `batch` is the number of images processed at the same time. For example, `batch=32` means processing 32 images simultaneously, calculating 32 `loss` values, and taking their average for backpropagation.
+3. Update the parameter through backpropagation.
+
+### Next
+
+The learnable `CLS` token is concatenated with the image patches to form a `197×768` token matrix. Positional embedding is then added before the matrix enters the `Transformer Encoder`, which produces a `197×768` output. Token 0 (the final `CLS` output) is extracted and passed to the classification head to produce **logits**.
+
+![CLS token and image-classification training flow](/img/cv_img/ViTimg/image-3.png)
+
+> The `cls token` is concatenated with 196 patch vectors to form 197 vectors. Positional embedding is added before entering the Transformer Encoder. The classification head produces logits; the cross-entropy loss function then compares these logits with the ground-truth class label, and backpropagation updates the trainable parameters.
+
+## Positional Embedding
+
+Before being passed into the **Transformer Encoder**, a positional embedding is added. In the original ViT, this is a learnable **absolute 1-D positional embedding**: one learned vector for each position in the flattened token sequence.
+
+![Adding positional embeddings to the token sequence](/img/cv_img/ViTimg/image-4.png)
+
+> Each of the 197 token embeddings is added to its corresponding positional encoding, forming a token with positional information before being sent to the Transformer Encoder.
+
+The original paper compares no positional embedding, one-dimensional positional embedding, two-dimensional positional embedding, and relative positional embedding. The learned one-dimensional embedding performs best in that paper's specific ablation, but this is **not a universal rule**; many later ViTs use 2-D, relative, or RoPE-style positional methods.
+
+![Ablation comparison of positional embedding choices](/img/cv_img/ViTimg/image-5.png)
+
+> Experimental comparison of No Pos. Emb., 1-D Pos. Emb., 2-D Pos. Emb., and Rel. Pos. Emb.
+
+## Transformer Encoder
+
+![Pre-LayerNorm Transformer encoder block](/img/cv_img/ViTimg/image-6.png)
+
+> Transformer Encoder architecture: Norm, Multi-Head Attention, residual connection, Norm, MLP, and another residual connection, repeated `L×`.
+
+## Multi-head Attention
+
+![Scaled dot-product and multi-head attention overview](/img/cv_img/ViTimg/image-7.png)
+
+> Architecture of Scaled Dot-Product Attention and Multi-Head Attention, including Q, K, V, MatMul, Scale, optional Mask, SoftMax, Concat, and Linear. Standard ViT encoder attention is **unmasked**; the optional mask belongs to the generic Transformer diagram.
+
+![Per-head QKV attention computation and output projection](/img/cv_img/ViTimg/image-8.png)
+
+> Multi-head attention computation: each head uses $W^q$, $W^k$, and $W^v$ to obtain Q, K, and V. The attention outputs are concatenated and mapped through $W_o$.
+
+Different heads can learn different relationships between tokens, although this is not guaranteed and some heads can become redundant.
+
+### At the Code Level
+
+![Tensor shapes in a multi-head attention implementation](/img/cv_img/ViTimg/image-9.png)
+
+> The `197×768` token matrix is linearly mapped to Q, K, and V, then split into multiple attention heads. The diagram uses 8 heads of dimension 96 (`8×96 = 768`) as a generic example. **Original ViT-B/16 instead uses 12 heads of dimension 64.** Each head computes its attention output `Z`; all head outputs are concatenated and then mapped once by the output projection $W_o$.
+
+In code, Q, K, and V are commonly produced by one fused linear layer and then reshaped into heads. The heads compute attention in parallel. Their outputs are concatenated before the single output projection $W_o$; $W_o$ is not applied independently to each head.
+
+## MLP (Feedforward Neural Network)
+
+![ViT feedforward MLP dimensions](/img/cv_img/ViTimg/image-10.png)
+
+> MLP architecture: `197*768 → Linear → 197*3072 → GELU → Dropout → Linear → 197*768 → Dropout`.
+
+- **Attention:** Mixes information among the 197 `token`s.
+- **MLP:** Mixes the 768 feature values within each `token`.
+- **GELU (nonlinear function):** Enables ViT to learn more complex visual patterns. Without a nonlinear function, the two linear functions could be combined into one, so separating them would be meaningless.
+- **Dropout:** A regularization option that can reduce overfitting. Its use and rate vary by ViT implementation; some modern variants rely more on drop-path or other regularization.
+
+## ViT Training Method
+
+### Supervised Learning
+
+The classification head produces logits. The `Cross entropy loss` compares those logits with the ground-truth class label, followed by `back propagation`.
+
+In the original ViT paper, the pre-training classifier uses an MLP head with one hidden layer. During fine-tuning, it is replaced by a single linear classification layer for the target dataset.
+
+**Back propagation updates:**
+
+1. Patch embedding (linear projection layer)
+2. Attention
+3. MLP
+4. CLS token
+5. Positional embedding, LayerNorm parameters, the classification head, biases, and all other trainable parameters
+
+### Pre-training
+
+ViT has less **CNN-style inductive bias** than CNN. The original ViT results showed that large-scale pre-training was particularly beneficial for learning general visual representations. However, this is not an absolute requirement: later methods such as DeiT showed that ViTs can also be trained effectively on ImageNet-1K using stronger augmentation, regularization, and distillation.
+
+### Fine-tuning
+
+The model is then adapted to a specific task through `fine-tuning`. During transfer to a new task, the classification head can be replaced with a new one, with either of the following options:
+
+1. Freeze the ViT encoder and train only the new head (**linear probing**; this is usually not called full fine-tuning).
+2. Update all ViT model parameters (**full fine-tuning**).
+
+### Inductive Bias
+
+**Inductive bias** means assumptions built into an architecture before it sees training data. CNN has strong locality and translation-equivariance biases. ViT has less of these CNN-style biases, but it is not bias-free: patch splitting, the patch grid, and positional embeddings are still architectural assumptions.
+
+## Differences Between ViT and CNN
+
+### Inductive Bias
+
+#### CNN
+
+- **Locality:** Each convolution computes from a small local neighbourhood of pixels. A convolution does not inherently know a pixel's absolute position; it uses the same kernel weights at every location.
+- **Translation Equivariance:** Translating the input approximately translates convolution feature maps because the kernel weights are shared. Padding, stride, and pooling make this only approximate in practice. For image classification, pooling and later aggregation help produce translation **invariance**.
+
+#### ViT
+
+ViT does not have CNN's local convolution and translation-equivariance assumptions to the same degree. However, the original ViT does **not** attend directly between individual pixels: it first groups pixels into patches. From the first self-attention layer, every **patch token** can attend to every other patch token, giving global patch-to-patch interaction.

@@ -1,0 +1,153 @@
+---
+title: "ViT（Vision Transformer）"
+description: "Vision Transformer 的架構、訓練方式及其與 CNN 的差異"
+---
+
+# ViT（Vision Transformer）
+
+**僅使用 Encoder**
+
+![ViT 整體架構](/img/cv_img/ViTimg/image.png)
+
+> ViT 整體架構：影像切分成 patches、展平 patch 的線性投影、Patch 與位置嵌入、Transformer Encoder、MLP Head，以及分類輸出。
+
+> **設定說明：** 以下數值例子使用 **ViT-B/16**：`224×224` RGB 輸入、`16×16` patches、196 個影像 patches、嵌入維度 768、12 個 Transformer layers、12 個 attention heads，以及 MLP 隱藏層維度 3072。其他 ViT 變體可使用不同設定。
+
+## 輸入
+
+- **影像大小：** `224×224×3`
+- **Patch 大小：** `16×16×3`
+- **Patch 數量：** `196`
+
+每個 patch 包含 `16×16×3 = 768` 個像素值。它會先展平，再線性投影成 768 維的 **patch embedding**。以常見深度學習矩陣排列來看，一張影像會變成 `196×768`：196 個 tokens，每個 token 有 768 個特徵值。`768×196` 則是同一資訊的另一種矩陣方向慣例。
+
+### 展平 Patches 的線性投影
+
+展平後的 patch 向量會進入 **Linear Projection of Flattened Patches**（`z = xW + b`），產生初始 patch embeddings。這還不是最終的視覺特徵；Transformer Encoder 會進一步學習 patches 之間更豐富的關係。
+
+![Patch 展平與線性投影](/img/cv_img/ViTimg/image-1.png)
+
+> 一張 `224×224×3` 影像被分成 196 個 `16×16×3` patches。每個 patch 展平後，經線性網路映射成一個 768 維向量。
+
+### 使用卷積實作 Patch Embedding
+
+實作上可使用卷積計算：
+
+- `16×16` kernel；由於有三個 RGB channels，kernel 形狀為 `3×16×16`
+- stride 為 `16`
+- `768` 個 convolution kernels（輸出 channels），等同於對每個展平 patch 套用一個輸出 768 維的線性層
+
+同一組卷積權重會在每個 patch 位置共用。輸出為 `14×14×768` feature map，再重塑為 `196×768` token matrix。
+
+![卷積實作 Patch Embedding](/img/cv_img/ViTimg/image-2.png)
+
+> 使用 768 個 `16×16×3` 卷積 kernels，stride `S=16`、padding `P=0`，輸出為 `14×14×768`，再展平成 196 個 768 維向量。
+
+## 分類 Token（CLS Token）
+
+1. 隨機初始化與 token embedding 相同維度的 `CLS` 參數（`1×768`）。
+2. 每個 batch 都會複製同一個 `CLS token`。batch 是同時處理的影像數量；例如 `batch=32` 代表同時處理 32 張影像，通常會計算並平均 32 個 loss 後進行反向傳播。
+3. 該參數會透過反向傳播更新。
+
+### 下一步
+
+`CLS` 參數會與影像 patches 串接，形成 `197×768` token matrix。加入 positional embedding 後，矩陣會進入 Transformer Encoder，輸出仍為 `197×768`。取出第 0 個 token（最終 `CLS` 輸出）並交給 classification head，產生 **logits**。
+
+![CLS Token 與分類流程](/img/cv_img/ViTimg/image-3.png)
+
+> `CLS token` 與 196 個 patch vectors 串接成 197 個 vectors。加入 positional embedding 後進入 Transformer Encoder。classification head 產生 logits；cross-entropy loss 再把 logits 與真實類別標籤比較，並以反向傳播更新可學習參數。
+
+## 位置嵌入
+
+進入 **Transformer Encoder** 前會加入 positional embedding。原始 ViT 使用可學習的 **absolute 1-D positional embedding**：展平後 token 序列的每一個位置各有一個可學習向量。
+
+![位置嵌入加入 Token](/img/cv_img/ViTimg/image-4.png)
+
+> 197 個 token embeddings 分別加上對應的位置嵌入，形成帶有位置資訊的 tokens，再送入 Transformer Encoder。
+
+原始論文比較了沒有位置嵌入、1-D、2-D 及相對位置嵌入。可學習的 1-D embedding 在該論文的特定消融實驗中表現最佳，但這 **不是通用規則**；許多後續 ViT 使用 2-D、relative 或 RoPE 類位置方法。
+
+![位置嵌入消融比較](/img/cv_img/ViTimg/image-5.png)
+
+> No Pos. Emb.、1-D Pos. Emb.、2-D Pos. Emb. 與 Rel. Pos. Emb. 的實驗比較。
+
+## Transformer Encoder
+
+![Transformer Encoder 架構](/img/cv_img/ViTimg/image-6.png)
+
+> Transformer Encoder 使用 pre-LayerNorm 結構：Norm、Multi-Head Attention、residual connection，再接 Norm、MLP 與另一個 residual connection，重複 `L×`。
+
+## Multi-head Attention
+
+![Scaled Dot-Product 與 Multi-Head Attention](/img/cv_img/ViTimg/image-7.png)
+
+> Scaled Dot-Product Attention 與 Multi-Head Attention，包括 Q、K、V、MatMul、Scale、可選的 Mask、SoftMax、Concat 及 Linear。標準 ViT encoder attention 是 **不加 mask** 的；圖中的 optional mask 屬於通用 Transformer 圖示。
+
+![Multi-head Attention 計算](/img/cv_img/ViTimg/image-8.png)
+
+> 每個 head 以 $W^q$、$W^k$、$W^v$ 取得 Q、K、V。所有 attention outputs 串接後，再經 $W_o$ 映射。
+
+不同 heads 可以學習 tokens 之間不同的關係，但這並非保證；部分 heads 可能變得冗餘。
+
+### 從程式碼角度理解
+
+![QKV 與 Multi-head Attention 實作](/img/cv_img/ViTimg/image-9.png)
+
+> `197×768` token matrix 經線性映射成 Q、K、V，再切分為多個 attention heads。圖中使用 8 個、每個維度 96 的 heads（`8×96 = 768`）作一般例子；**原始 ViT-B/16 則使用 12 個、每個維度 64 的 heads。** 每個 head 算出 attention output `Z`；所有 head outputs 串接後，只會經 output projection $W_o$ 映射一次。
+
+程式實作中，Q、K、V 通常由一個 fused linear layer 一次產生，再 reshape 成多個 heads。所有 heads 平行計算 attention；輸出先串接，才經單一 $W_o$。$W_o$ 不會獨立套用到每個 head。
+
+## MLP（Feedforward Neural Network）
+
+![MLP 架構](/img/cv_img/ViTimg/image-10.png)
+
+> MLP 架構：`197×768 → Linear → 197×3072 → GELU → Dropout → Linear → 197×768 → Dropout`。
+
+- **Attention：** 混合 197 個 tokens 之間的資訊。
+- **MLP：** 在每個 token 內混合 768 個特徵值。
+- **GELU（非線性函數）：** 令 ViT 能學習更複雜的視覺模式。若沒有非線性函數，兩個 linear functions 可以合併成一個，因此分開便沒有意義。
+- **Dropout：** 一種可減少 overfitting 的 regularization 選項。是否使用及其比率會因 ViT 實作而異；一些現代變體更多使用 drop-path 或其他正則化。
+
+## ViT 訓練方式
+
+### 監督式學習
+
+classification head 會產生 logits；`Cross entropy loss` 將 logits 與真實類別標籤比較，再進行 `back propagation`。
+
+在原始 ViT 論文中，pre-training classifier 使用帶有一個 hidden layer 的 MLP head。Fine-tuning 時，會把它換成目標資料集所需的單一 linear classification layer。
+
+**反向傳播會更新：**
+
+1. Patch embedding（linear projection layer）
+2. Attention
+3. MLP
+4. CLS token
+5. Positional embedding、LayerNorm parameters、classification head、biases，以及其他所有可學習參數
+
+### Pre-training
+
+ViT 的 **CNN-style inductive bias** 少於 CNN。原始 ViT 結果顯示，大規模 pre-training 對學習通用視覺表示特別有幫助；但這不是絕對要求。後續方法如 DeiT 顯示，透過較強的 augmentation、regularization 及 distillation，ViT 也可在 ImageNet-1K 上有效訓練。
+
+### Fine-tuning
+
+模型可透過 `fine-tuning` 適應特定任務。遷移到新任務時，可換上新的 classification head，並有兩種常見選項：
+
+1. 凍結 ViT encoder，只訓練新 head（**linear probing**；通常不稱為 full fine-tuning）。
+2. 更新所有 ViT 模型參數（**full fine-tuning**）。
+
+### Inductive Bias
+
+**Inductive bias** 是指模型在看到訓練資料前，架構本身就帶有的假設。CNN 具有很強的 locality 和 translation-equivariance biases。ViT 的這些 CNN-style biases 較少，但也不是毫無偏置：patch splitting、patch grid 與 positional embeddings 都是架構假設。
+
+## ViT 與 CNN 的差異
+
+### Inductive Bias
+
+#### CNN
+
+- **Locality：** 每次 convolution 都從一個小型局部 pixel neighbourhood 計算。Convolution 本身不會知道 pixel 的絕對位置；它在每個位置使用相同 kernel weights。
+- **Translation Equivariance：** 平移輸入時，convolution feature maps 會近似地一起平移，因為 kernel weights 被共用。Padding、stride 及 pooling 會令它在實際上不是完全等變。對影像分類而言，pooling 及後續 aggregation 有助產生 translation **invariance**。
+
+#### ViT
+
+ViT 在 local convolution 與 translation-equivariance 假設上，不像 CNN 那麼強。不過原始 ViT **不會** 直接讓個別 pixels 互相 attention：它先把 pixels 分組成 patches。從第一個 self-attention layer 開始，每個 **patch token** 都能 attention 到其他 patch tokens，形成全域的 patch-to-patch interaction。
