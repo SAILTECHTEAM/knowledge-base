@@ -69,6 +69,29 @@ zellij list-sessions
 | `Ctrl+t` 然后 `x` | 关闭面板 |
 | `Ctrl+t` 然后 `?` | 切换浮动帮助面板 |
 
+### SSH 代理转发
+
+Zellij 在会话创建时捕获环境变量，此后不再刷新——重新连接不会刷新，新建面板也不会继承新值（[zellij#1637](https://github.com/zellij-org/zellij/issues/1637)）。使用 SSH 代理转发时，重连后每个面板仍指向原连接的 `SSH_AUTH_SOCK` 套接字，导致认证失败。
+
+解决方法是将 `SSH_AUTH_SOCK` 固定到一个稳定路径，并在每次登录时把符号链接重新指向当前转发的套接字。将以下内容加入 `.bashrc`/`.zshrc`。它在每次 SSH 登录时执行；不等判断可防止 Zellij 内的 shell 把符号链接重新链接到自身：
+
+```bash
+AGENT_SOCK="/run/user/$(id -u)/ssh_auth.sock"
+if [ -n "${SSH_AUTH_SOCK}" ] && [ "${SSH_AUTH_SOCK}" != "${AGENT_SOCK}" ]; then
+  ln -sfn "${SSH_AUTH_SOCK}" "${AGENT_SOCK}"
+fi
+export SSH_AUTH_SOCK="${AGENT_SOCK}"
+```
+
+每个面板持有固定路径。每次重连都会重新指向符号链接，所有面板——包括重连前启动的 shell——在下一次 `ssh`/`git` 调用时即恢复工作，无需重启面板。
+
+- 最后一次登录生效：符号链接是全局的，并发 SSH 连接共享同一个代理套接字。
+- 断开与重连之间，该路径解析为失效套接字——转发的代理随 SSH 会话终止。
+
+:::note[推广到更多变量]
+符号链接方式只刷新一个变量。当更多变量会失效时（`DISPLAY`、`WAYLAND_DISPLAY` 等），可在 attach 前用 `declare -p` 把环境导出到文件，并在面板内 shell 的 `precmd` 钩子中检测文件 mtime 变化后重新 source。完整实现见 [zellij#1637](https://github.com/zellij-org/zellij/issues/1637)。
+:::
+
 ### CLI 用法
 
 Zellij 可完全通过命令行和 shell 脚本驱动，包括控制主机上其他位置运行的会话。这是无头工作流、CI 流水线和工作区自动化的基础。

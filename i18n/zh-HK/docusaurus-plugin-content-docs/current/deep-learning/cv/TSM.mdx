@@ -1,104 +1,108 @@
 ---
 title: TSM
 sidebar_position: 1
+description: 時間移位模組，一種零參數的時間建模方法，讓 2D CNN 獲得影片理解能力。
 ---
 
- 🧩🧩🧩
+# 時間移位模組（TSM）
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image1.png)
+**論文：** Ji Lin, Chuang Gan, Song Han, TSM: Temporal Shift Module for Efficient Video Understanding, ICCV 2019.
 
-相比2D CNN只能對單幀進行空間特徵提取，在視頻理解任務中3D CNN能夠同時建模空間和時間信息，因此可以提取更復雜的時空特徵。 
+**論文連結：** https://openaccess.thecvf.com/content_ICCV_2019/papers/Lin_TSM_Temporal_Shift_Module_for_Efficient_Video_Understanding_ICCV_2019_paper.pdf
 
-**3D卷積圖**🧩🧩🧩
+**程式碼：** https://github.com/mit-han-lab/temporal-shift-module
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image2.png)
+![TSM 總覽：把一部分通道在時間上移位，再做 2D 卷積](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image1.png)
 
-**2D卷積圖**🧩🧩🧩
+2D CNN 一次只從一幀提取空間特徵，3D CNN 同時對空間和時間建模，能抓住更豐富的時空結構。
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image3.png)
+**3D 卷積**
 
-然而，3D卷積需要在時間維度上進行額外計算，導致計算量和參數量顯著增加，難以應用於實時或資源受限的場景。
-因此，一個關鍵問題是：
-> 能否在保持2D CNN高效計算的基礎上，引入時間建模能力？
+![在空間和時間上做的 3D 卷積](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image2.png)
+
+**2D 卷積**
+
+![在單幀上做的 2D 卷積](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image3.png)
+
+3D 卷積在時間維度上增加了計算，代價和參數量隨之上升，在即時或資源受限的場景下難以部署。這裡的問題是：
+
+> 能否在保持 2D CNN 效率的同時，加上時間建模能力？
 
 ## 解決方法
-	
-###  TSM提出的是一種輕量的混合方式。
-如下圖所示 可以看到特徵的4個維度其中C為通道，T是時間維度。
-🧩🧩🧩
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image4.png)
-- TSM的核心操作在於：將一部分通道沿着時間維度進行shift（包括前後移動）這樣機器可以使用標準2D卷積進行batch並行處理，提高運算效率。
- 
-###  Shift的作用：
-以圖中b示意為例，橘色為t=0 那麼在shift後的當前幀的特徵就會來自t-1和t+1（文章中只shift 1），上圖b和c分別表示offline與online方法進行shift。 
-- （b）Offline的shift操作雙向的，當前時間點會看到未來的資訊。
-- （c）Online的Tsm模型由於得不到未來幀的通道信息，單向操作。我們只需要改變數據的地址，所以這種操作不需要任何flops或者參數的增加。
+### TSM 把一部分通道在時間上移位
 
-###  核心思想在於：
-**3D原本目的：** 變成2D減少計算量
-- 先shift 後卷積 所以c中t那一行卷積後獲得的channel取一部分shift到t-1（offline還有t+1）。
-- 至於哪一個channel比較重要就讓機器自己學，因為不知道時間性上哪一個channel更重要。
-🧩🧩🧩
+特徵有四個維度，其中 $C$ 是通道維度，$T$ 是時間維度。
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image5.png)
-- 現在可以在時間維度上用batch並行處理了，因為變成了2D convolution，我們把時間維度用shift來做拼接。之後的convolution融合。
+![通道沿時間維度的移位](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image4.png)
 
-## Temporal Shift Module方法
- 🧩🧩🧩
+核心操作是把一小部分通道沿時間前移或後移。移位之後，每一幀都帶有一部分相鄰幀的通道，接下來的普通 2D 卷積在混合這些通道時就混入了時間資訊，而計算本身仍然是二維的。
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image6.png)
-### 
- - a圖表示延遲開銷，如圖我們可以看到從原點上不做 TSM（2D CNN）到1所有 channel 都 shift（極端情況），shift 的 channel 越多，tsm會增加 latency overhead，所以論文采用了1/4的 shift。
-*（好像默認設置的 tsm 是 offline 的）*
-- b圖為精度對比，綠線表示直接 shift，藍線表示殘差結構 shift，藍線效果最好因為 residual 會保留原始的信息不破壞空間特徵。圖片也表明 shift 不是越多越好 反而有可能會導致 accuracy 下降。
-###  模型設計：Residual TSM 與 In-Place TSM 
-🧩🧩🧩
+### 移位的作用
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image7.png)
+![離線雙向移位與在線單向移位的對比](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image5.png)
 
-**(a)在shift之後才進行的殘差連接**
-雖然 shift 的內容不會增加任何參數和 Flop，但是如果直接把 Shift 放 Residual Connection 之前（a），會導致當前幀的一部分特徵被移動到了相鄰幀，導致當前幀無法再訪問這些已經被移走信息，這樣就會削弱2D CNN原本擅長的對當前畫面的理解能力，從而影響檢測的精度。
-尤其是當位移大量通道的時候，當前幀中存儲的被移動通道中的信息會丟失。因此雖然模型獲得了時間信息，但對當前畫面的理解能力會下降，從而影響最終的識別效果。
-**(b) Residual TSM 可以理解為**：
-在加入時間信息的同時，把原來的信息也完整保留下來。這樣即使某些特徵被移動到了前後幀，模型仍然能夠通過殘差連接看到當前幀的完整內容，因此不會像 In-Place TSM 那樣因為信息被搬走而影響識別效果。
+以圖（b）為例，當前幀從 $t-1$ 幀和 $t+1$ 幀各取來一部分移位通道。論文在每個方向上只移動一幀。
 
- 
-### 	Offline TSM video models 
+- 圖（b）的離線移位是雙向的。整個影片已經在手，當前幀可以用過去和未來的資訊。
+- 圖（c）的在線移位是單向的。未來幀還沒有出現，通道只能從過去傳到現在。這個操作只改變資料的存放位置，不增加 FLOPs，也不增加參數。
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image8.png)
+### 核心思想
 
-**Offline TSM** 和 **Online TSM** 的最大區別在於：
-因為離線推理時整個視頻已經錄製完成，所以模型能夠提前看到未來的信息；而在線推理時未來幀還沒有產生，因此不能使用未來信息。
-- 論文正是利用這一點，在 Offline TSM 中將部分通道向前移動、部分通道向後移動，從而實現雙向時間信息交換。
-> 但是論文結果中似乎認為**不把還未發生**的時間幀移動進來效果更好。
+先移位，再卷積。移位之後，2D 卷積負責把混在一起的通道融合起來。哪些通道在時間上更重要，留給網路自己學，因為不同層、不同任務的答案不一樣。
 
-- 圖中首先在左側藍色Video中進行視頻採樣得到Frames，然後接上的圖中第一個2D Conv就是普通的 ResNet 卷積層用來提取空間特徵（如人體輪廓，衣服的紋理…）而不是時間特徵。經shift之後，當前Feature 中可能同時存在過去幀、當前和未來幀的信息，但由於shift 本身不學習任何東西，再用後面的2D卷積融合這些時間信息。
-### 基於base TSM（offline）後提出的擴展Online temporal shift
+重的運算仍然是 2D 卷積，所以可以沿時間做批量並行。移位提供時間混合，後面的卷積完成融合。
 
-Online temporal 無法得到視頻的未來幀，所以是Uni-directional 的。
-  🧩🧩🧩
+## 移多少、在哪裡移
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image9.png)
+![不同移位比例下的延遲開銷和準確率](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image6.png)
 
-上圖中展示了用於Online中的單向TSM 重複該流程。首先對每一幀每一個殘差塊的前1/8個特徵圖保存並緩存道內存中。然後對於下一幀將當前特徵圖的前1/8替換為緩存的特徵圖，最後將7/8個當前特徵圖 和1/8箇舊特徵圖組合起來生成下一層。使用單向TSM進行在線視頻識別可以獲得以下幾個優勢： 
-- 低延遲推理：對於每一幀，我們只需要替換並緩存 1/8 的特徵，無需任何額外的計算。因此，每幀預測的延遲幾乎與 2D CNN 基線模型相同。
-- 內存佔用低：由於ResNet-50僅將一小部分特徵緩存到內存中，因此內存佔用很低。例如，ResNet-50僅添加0.9MB緩存來存儲中間特徵。
-- 多層次時間融合： TSM 支持所有層次的時間融合。
+圖（a）是資料搬運帶來的延遲開銷。移動全部通道在 CPU 上帶來約 13.7% 的額外延遲，不容忽視。只移動例如 1/8 的通道，開銷降到約 3%。所以論文只移動一部分通道。
 
-Online tsm中我們只能訪問當前幀和過去幀，因此，TSM採用了一種單向的時間信息傳遞方式，在處理當前F<sub>t</sub>時，模型會從上一幀中取出一部分特徵（例如1/8的通道）並緩存到內存中，然後在下一幀 F<sub>t+1</sub>處理時，將這部分緩存的特徵替換當前幀的一部分特徵，從而實現跨時間的信息傳遞。整個過程不需要額外計算，只是進行數據的移動，因此幾乎不會增加計算開銷。同時，由於大部分特徵仍來自當前幀（如7/8），模型仍然可以保持良好的空間建模能力。這種方式使得TSM能夠在保持2D CNN計算複雜度的同時，實現類似3D CNN的時序建模能力，並且特別適用於低延遲的實時任務，例如自動駕駛或視頻監控。
-PS.這裏1/8的來源指的是前文中基於offline得到的shift1/4最好
+圖（b）是準確率對比。殘差移位在各種比例下都好於原地移位。移得越多，時間推理先變好，當前幀的空間表達隨後變差，準確率先升後降。殘差移位的峰值出現在移動四分之一通道處。
+
+:::tip[預設設置]
+論文預設使用四分之一通道的殘差移位：離線雙向建模裡，1/8 前移，1/8 後移。
+:::
+
+### 模型設計：殘差 TSM 與原地 TSM
+
+![殘差塊之前的原地移位，與殘差分支內部的移位之對比](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image7.png)
+
+原地移位把操作插在卷積層或殘差塊之前。被移走的通道把資訊帶離了當前幀，當前幀就拿不到這些通道原來攜帶的內容。移動的通道越多，主幹表達當前畫面的能力退化越嚴重。
+
+殘差移位把操作放在殘差分支內部。恆等路徑仍然完整傳遞當前幀的激活，時間資訊是加上去的，原來的內容並沒有被拿走。即使分支裡的通道全部移位，shortcut 也保住了空間表達能力。這就是殘差移位在論文的 Kinetics 對比裡全面好於原地移位的原因。
+
+## 離線 TSM 影片模型
+
+![帶雙向時間交換的離線 TSM 影片模型](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image8.png)
+
+離線推理面對的是已經錄好的完整影片，未來幀是可見的。模型把一部分通道前移、一部分後移，實現雙向的時間資訊交換。影片採樣先得到各幀，早期的普通 ResNet 卷積提取空間結構，後面的 2D 卷積融合移位後的混合特徵。移位本身沒有參數，所有的學習都發生在後面的卷積裡。
+
+## 在線時間移位
+
+在線推理用不到未來幀，所以移位是單向的。
+
+![帶特徵快取的在線單向 TSM 流程](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image9.png)
+
+![在線移位的細節：快取的過去通道替換當前幀的一部分](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image10.png)
+
+對每一幀、每個殘差塊，模型把前 1/8 的特徵圖存入記憶體。下一幀到來時，它的前 1/8 被快取的內容替換。這樣每一層處理的是 7/8 的當前幀加上 1/8 的過去幀。這種設計有三個實際好處：
+
+- 推理延遲低：每幀只做一次小規模的替換和快取，每幀延遲接近 2D 基線。
+- 記憶體佔用小：只快取一小部分特徵（論文報道 ResNet-50 只多用約 0.9 MB）。
+- 時間融合發生在每一層：同樣的操作在網路的各個階段重複，時間混合貫穿始終。
+
+1/8 這個數字直接來自離線的結論。離線雙向移位總共移動 1/4：
+
+```text
+離線雙向 TSM：總共 1/4 = 前移 1/8 + 後移 1/8
+在線單向 TSM：總共 1/8 = 只用過去幀
 ```
-Offline（雙向）TSM：總共 shift = 1/4
-= 1/8 向前 + 1/8 向後
 
-Online（單向）TSM：只 shift = 1/8
-= 只用過去幀
-```
-🧩🧩🧩
+![TSM 與 3D 基線在準確率和計算量上的權衡](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image11.png)
 
-![TSM結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/TSMimg/image11.png)
+## 參考文獻
 
-
-
-
+- Ji Lin et al., TSM: Temporal Shift Module for Efficient Video Understanding, ICCV 2019.
+- Reference implementation: https://github.com/mit-han-lab/temporal-shift-module

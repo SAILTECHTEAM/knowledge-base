@@ -1,88 +1,110 @@
 ---
 title: I3D
 sidebar_position: 1
+description: 膨脹 3D 卷積網路，把 2D 圖像模型擴展為時空影片模型並重用 ImageNet 權重，以及 Kinetics 資料集。
 ---
 
-🧩🧩🧩
-![I3D結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image1.png) 
+# I3D（膨脹 3D 卷積網路）
 
-## 背景：有兩個貢獻：
-### 	提出了一個新的模型I3D
-如何把一個2D模型擴張到3D模型呢？
-我們希望可以直接使用2D視頻理解直接做好的模型，不僅設計簡單還避免了預訓練的麻煩。
-### 	設計了數據集Kinetics Dataset 
-Kinetics Dataset 類別比較均衡，難度適中。視頻領域缺少一個比較好的數據集讓大家可以很好的去研究這個視頻理解的框架，本文作者提出視頻的模型最好還是在視頻上預訓練本文就是先提出了一個視覺模型，然後再現有的視頻數據集上訓練新的模型。
- 🧩🧩🧩
+**論文：** Joao Carreira and Andrew Zisserman, Quo Vadis, Action Recognition? A New Model and the Kinetics Dataset, CVPR 2017.
 
-![I3D結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image2.png)
+**論文連結：** https://arxiv.org/abs/1705.07750
 
-如果只通過一張圖來看是不能區分準確的動作的
+**程式碼：** https://github.com/deepmind/kinetics-i3d
 
-## 	前置相關工作
-### 	EfficientNet
-- **論文地址：** https://arxiv.org/abs/1905.11946
-也是 google 提出來的網絡縮放的方法，使用複合係數均勻縮放網絡層數，通道數和輸入圖像的大小（resolution）。
-- 最主要的核心在於網絡很多時候時需要調參的，但是可不可以把網絡當作一個參數去調，試出來最好的channel、深度和最好的解析度。
-	- **Depth** 更深的網絡可以提取到更豐富的特徵，理解能力更強。但是太深也會導致梯度消失，雖然可以用BN來緩解這些問題。但是accuracy gain會減少看到了整個畫面但是不會還是不會。
-  - **Width** 寬度也是一樣，理論上可以捕捉到更多的channel，也可以理解為觀察的角度更多。但是如果深度很淺的話沒有辦法得到高層的特徵，只能停留在低級特徵學不到高級語義，因為不同channel的特徵還沒有混合到很好，寬度也會飽和。
-  - **Resolution**  理論上解釋度越高也可以看到更多的資訊，但是如果分辨率太高會導致爆炸增長計算量，而且很多細節也許對分類沒有太大幫助，也會有一個飽和。
- 🧩🧩🧩
+![DeepMind 與牛津大學作者的 I3D 論文標題欄](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image1.png)
 
-![I3D結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image3.png)
+## 背景：兩項貢獻
 
-觀察得到網絡的深度，寬度和分辨率是互相影響的，因此平衡這三個參數是追求更高準確率的重要關鍵因素之一。我們能不能把他們同時進行調節呢？
-- 使用一組固定的複合係數ϕ
+### 提出了新模型 I3D
 
-例如：計算資源為 2^N 倍，就將網絡的深度、寬度和 resolution 分別增加為
+這裡要回答的問題是，如何把成熟的 2D 圖像模型擴展為 3D 影片模型。好的擴展方法會沿用 2D 網路的結構和預訓練權重，這樣訓練仍然簡單，ImageNet 預訓練的成果也不會浪費。
 
-**α<sup>N</sup> 、β<sup>N</sup> 和 γ<sup>N</sup> 倍**
-🧩🧩🧩
+### 設計了 Kinetics 資料集
 
-![I3D結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image4.png)
+此前的影片研究缺少一個規模與 ImageNet 相當的大資料集。作者發佈了 Kinetics-400：400 個人體動作類別，每個類別有 400 多個影片片段，總計約 30 萬個片段，每個片段長約 10 秒，取自 YouTube。作者還指出，影片模型應當在影片資料上預訓練，而不能只依賴圖像預訓練，Kinetics 資料集讓這種預訓練成為可能。
 
-其中 α、β、γ 是對小模型進行 small grid search 而決定的常數，用來把模型精簡成一個base，縮小模型。
-### 	Optical flow光流
-**計算 frame 的位移，用於檢測物體移動，因為實際上兩個 frame 之間的差距不會差太多，可以減少震動的狀況。**
-1)	**理想條件：** 亮度恆定不變，時間連續以及背景不會劇烈變化。
- 🧩🧩🧩
-![I3D結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image5.jpeg)
-光流的作用在於當我們的任務重點在於查看運動物體前後時間的位移。如果圖中沒有運動目標，那麼光流矢量在整個圖像就只是沒有動的點，當圖像中有運動時。目標和背景有相對運動。運動物體形成的速度矢量一定和背景的速度矢量不同而計算出運動物體的位置。每一個再每一幀都會pixel算第二幀的移動向量，所以計算量實際上也很大。
-**2)	缺點：** 光流場並不一定反映了目標的實際運動情況。它的完成條件在於亮度恆定不變，因此光流法對光線敏感，當光源和物體發生相對運動的時候會有光流產生，因此光線的變化很容易影響識別的效果。
-## 	I3D
-### 	
- 🧩🧩🧩
+![缺少周圍幀時動作標籤存在歧義的單幀畫面](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image2.png)
 
-![I3D結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image6.png)
- ![I3D結構圖](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image7.png)
+單張圖像常常無法確定動作標籤。周圍幀提供的運動資訊可以消除這種歧義，這也是論文把影片建模看作時空聯合建模問題的原因。
 
-### 	a）架構
- 這是一個 CNN+LSTM 的視頻理解架構，CNN只能看但張圖加上LSTM建模時間關係。更多還是把一個視頻看成了圖像問題，抽特徵的過程是完全分開的，然後把所有的內容扔給LSTM。取最後一個時間戳放到全連接層，全連接層把特徵映射到類別概率最後輸出分類的概率。但是真正的視頻動作時間和空間的信息應該是互相影響的，所以這個方法在視頻數據集中表現並不好。
-### 	b）架構
-這是一個 3D 卷積網絡，把連續的視頻幀看成一個 3D Volume。就是把視頻分成一個一個視頻段（1-k）然後把這一塊視頻段當作一個volume，包括了時間，高度，寬度。因為3D feature map很大，所以用池化層降低計算量，保留主要信息，用全連接層進行最終分類。但是這個模型的問題在於，普通的2D CNN可以用ImageNet預訓練，但是這個C3D模型沒有辦法直接繼承2D預訓練的權重從頭訓練可能會出現難訓練，過擬合，參數增加的問題。
-### 	c）雙流網絡
- 加入時序的方法就是使用了光流把運動信息提前算出來，學習映射關係，兩個網絡都是2D的。使用已經預訓練好的2D CNN同時把時間信息交給optical Flow，這樣就可以不用3D卷積也能獲得時間建模的能力。但是optical本身並不能被理解成是真正3D卷積裏的時間軸而是計算好的像素移動信息，提前計算運動然後給2D CNN學習。它和a的區別在於LSTM需要自己記憶前後幀的變化，但是Two-stream已經算好了運動，可以直接學習運動模式，時間建模更強但是依然是結果融合。
-### 	d）和e）
-都是講空間rgb和時間信息optical結合的模型。但是區別在於融合的位置和方式不同。
-### 	d）模型補充
-由於c）中的two-stream有一個問題在於optical需要提前計算，也就是需要額外跑一個光流，所以又構造了d）模型。d）中先用了兩個獨立的2D卷積（雙流網絡）提取rgb和光流的特徵，但是相比於c）只是直接的相加，d）將高層的feature map堆疊形成時空feature volume又將結果輸入到少量3D卷積網絡裏時序建模，在還沒有出結果的時候就先把兩個特徵結合在一起。但是計算光流也是一個很重的東西，最後還要多一個3D convolution 就會導致過程很heavy。
-### 	e）模型
-**就是I3D（膨脹式3D卷積神經網絡技術）**，RGB和光流分別各自進入獨立的3D卷積網絡，在各自分支中同時完成空間和時間特徵的提取，最後再進行融合，因此它是
-> “每個分支獨立完成時空建模，再進行結果融合”
+## 預備知識：光流
 
-再加在一起信息量最足。
-### 	ImageNet 數據集
-帶來的好處不光是可以訓練深度神經網絡，再這種大規模的數據集中預訓練之後可以抽特徵 然後有效的遷移到其他任務上去。但是再視頻領域，大規模數據集預訓練遷移到小數據集微調還沒有被完全引用。
-## 	方法
-### 	如何做inflate：
-- 整體的架構都保持不變，把2D的卷積變成3D的卷積，2D的 pooling 直接變成3D的 pooling。NxN濾波器變成NxNxN。
+光流估計相鄰幀之間每個像素的位移，是一種顯式的運動信號。當任務取決於物體隨時間如何運動，而不是靜態長相時，光流很有用。
 
-- 通過將圖像反覆複製到視頻序列中將圖像轉換成一個每幀都相同的視頻，讓 3D 網絡集成 2D 網絡的能力。
-### 	Bootstrapping（引導） 3D filters from 2D：
-> 如何用一個預訓練好的2D網絡模型初始化成一個3D的模型。
+標準的光流計算建立在三個假設上：
 
-- 平時在初始化我們的模型的時候，驗證初始化的方法是給定輸入，在原來的模型上跑一邊然後再在初始化後的模型上再跑一邊，理論上結果應該是一樣的。
-- 論文用同一張圖片反覆的複製粘貼變成了一個視頻，也就是一個每一幀都相同的視頻作為輸入的訓練視頻。
-- 而對於訓練方法具體做法就是作者把所有的2D filter也複製了n次，和輸入的視頻就對應起來了。
+- 亮度不變：被跟蹤的點在幀與幀之間保持亮度不變。
+- 運動很小：相鄰兩幀之間的位移不大。
+- 空間一致：相鄰像素的運動方式接近。
 
+由此可以直接看出它的侷限。光流場不一定等於真實的物體運動，因為演算法跟蹤的只是表面的亮度變化。它對光照也很敏感：光照一變，亮度不變的假設就不再成立，識別效果隨之下降。密集光流的計算開銷也很大，因為幾乎每個像素都要估計一個位移向量。
 
+![跑步人物身上的光流向量，以及補償相機運動之後的光流向量](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image5.jpeg)
 
+## I3D 模型
+
+在得出 I3D 之前，論文在同一基準下對比了五種結構。
+
+![論文對比的五種影片結構：LSTM、3D 卷積網路、雙流網路、3D 融合網路和雙流 I3D](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image6.png)
+
+### 結構 a）CNN 加 LSTM
+
+每一幀先經過 2D CNN，得到的特徵序列再送入 LSTM 做時序建模。特徵提取和時序推理是分開的：CNN 從來看不到運動，LSTM 拿到的只是每幀的概要資訊。空間和時間在特徵學習階段沒有互動，在影片基準上的準確率也比較一般。
+
+### 結構 b）3D 卷積網路
+
+連續幀在時間、高和寬三個維度上組成一個 3D 體。3D 卷積同時學習空間和時間資訊，用池化控制 3D 特徵圖的大小，用全連接層完成分類。它的短板在預訓練：普通 2D 網路可以直接繼承 ImageNet 權重，這個 3D 網路只能從頭訓練，訓練更難，也更容易過擬合。
+
+### 結構 c）雙流網路
+
+兩個 2D 網路並行運行，一個處理 RGB 圖像幀，一個處理預先算好的光流。兩個分支都可以用 ImageNet 預訓練，運動資訊來自光流輸入，而不是 3D 卷積。這裡的光流不是真正的時間軸，而是預先算好的位移資訊，再送給 2D 網路。融合只發生在打分層面，兩個流從不共享特徵。
+
+### 結構 d）和 e）
+
+兩種結構都融合了 RGB 和光流，區別在於融合的位置和方式。
+
+模型（d）保留了兩個 2D 流，但在高層把特徵圖融合成時空張量體，再送入一個小 3D 網路。融合提前到了最終決策之前，準確率有所提高，但整個流程仍然很重：還是要預先計算密集光流，又在上面疊了一個 3D 階段。
+
+模型（e）就是 I3D。RGB 和光流各自進入一個獨立的 3D 網路，每個分支都同時對空間和時間建模，兩個流在末端融合：
+
+> 每個分支獨立進行時空建模，再把兩路結果在末端融合。
+
+下表取自原論文，給出了每種設計的計算代價。I3D 的參數量是 25M，而純 3D 卷積網路是 79M，同時 I3D 在測試時的時間覆蓋範圍達到了完整的 10 秒。
+
+![五種結構的參數量和時間覆蓋範圍](https://raw.githubusercontent.com/SAILTECHTEAM/knowledge-base/main/static/img/cv_img/I3Dimg/image7.png)
+
+### ImageNet 預訓練與遷移
+
+在 ImageNet 這樣的大資料集上預訓練，可以讓網路學到能遷移到小任務上的特徵。在 Kinetics 出現之前，影片領域沒有對應的資料集，影片模型通常只能在 UCF-101 或 HMDB-51 這樣的小資料集上從頭訓練。I3D 加上 Kinetics 補上了這一塊，讓影片領域也有了和圖像領域一樣的「先預訓練再微調」的流程。
+
+## 方法實現
+
+### 如何做膨脹
+
+膨脹保持整體網路結構不變，只是把每個 2D 操作擴展為 3D：
+
+- 2D 卷積變為 3D 卷積，2D 池化變為 3D 池化。$k \times k$ 的濾波器在時間、高和寬三個維度上變為 $k \times k \times k$。
+- 時間步長和池化參數經過設置，使時間感受野隨深度逐漸增大，節奏與空間感受野的增大保持一致。
+
+### 從 2D 濾波器初始化 3D 濾波器
+
+目標是從預訓練好的 2D 網路初始化 3D 網路，使兩者在同一張靜止圖像及其重複構成的靜態影片上給出相同的輸出。
+
+檢驗方法如下。把一張圖像沿時間軸重複，得到每一幀都相同的靜態影片。在原圖上運行 2D 網路，在這個靜態影片上運行膨脹後的 3D 網路。正確的初始化應當讓兩者的輸出一致。
+
+具體做法是把每個 2D 濾波器沿時間軸重複 $N$ 次（$N$ 是膨脹後濾波器的時間尺寸），再把權重除以 $N$。這個除法很關鍵：不除的話，$N$ 個副本會把 $N$ 個相同的響應加起來，輸出會變成 2D 結果的 $N$ 倍。除以 $N$ 之後，3D 網路正好從 2D 網路結束的位置起步，再在 Kinetics 訓練中學習時序結構。
+
+## 實驗結果簡述
+
+在 Kinetics 上預訓練、再在小基準上微調之後，論文報道的雙流 I3D 在 UCF-101 上達到約 98.0% 的準確率，在 HMDB-51 上達到約 80.9%，明顯高於從頭訓練的同類結構。這個提升印證了論文的觀點：影片模型和圖像模型一樣，都極大受益於自身模態下的大規模預訓練。
+
+:::note[本文檔範圍說明]
+EfficientNet 式的深度、寬度和解析度複合縮放方法在這裡不討論。它比 I3D 晚兩年提出，與本文的膨脹機制論證無關。
+:::
+
+## 參考文獻
+
+- Joao Carreira and Andrew Zisserman, Quo Vadis, Action Recognition? A New Model and the Kinetics Dataset, CVPR 2017, arXiv:1705.07750.
+- Kinetics dataset: https://github.com/activitynet/ActivityNet/tree/master/Crawler/Kinetics
+- Reference implementation: https://github.com/deepmind/kinetics-i3d

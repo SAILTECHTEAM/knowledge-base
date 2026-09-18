@@ -1,0 +1,250 @@
+---
+sidebar_position: 4
+title: vLLM 实验与发现
+description: 单卡 RTX 2080 Ti 上 vLLM AWQ 4B 测试的基准工作流、日志、指标与发现。
+---
+
+# vLLM 实验与发现
+
+本页记录单卡 RTX 2080 Ti vLLM 测试的基准工作流、日志、结果与解释。LLM 推理理论见 [LLM 推理原理](../llm-inference-principles)，服务部署见 [vLLM 部署设置](./vllm-setup)。
+
+## 测试范围
+
+| 项目 | 取值 |
+| :--- | :--- |
+| GPU | NVIDIA GeForce RTX 2080 Ti |
+| VRAM | 约 11 GB |
+| 服务框架 | vLLM |
+| 模型 | `QuantTrio/Qwen3.5-4B-AWQ` |
+| 基座模型 | `Qwen/Qwen3.5-4B` |
+| 基准数据 | `vllm bench serve --dataset-name random` |
+| 基准命令族 | 针对 OpenAI 兼容 chat 端点的 `vllm bench serve` |
+| 标准提示词数 | `--num-prompts 200` |
+| 种子 | `--seed 0` |
+| 输出长度 | `--random-output-len 128` |
+| vLLM dtype | `float16` |
+
+:::caution[范围]
+这些是合成随机提示词的基础设施基准结果。它们展示的是受控输入/输出长度下的服务行为，而非产品质量或生产就绪度。
+:::
+
+:::note[为何使用 `float16`]
+测试使用 `--dtype float16`，因为 RTX 2080 Ti 是 Turing 架构 GPU，算力为 7.5。该硬件路径不像较新的数据中心 GPU 那样可以假定支持 `bfloat16`，因此 `float16` 是该基准设置中更稳妥的显式 dtype。
+:::
+
+## 对比中使用的指标
+
+| 指标 | 含义 | 在对比中如何使用 |
+| :--- | :--- | :--- |
+| 平均 TTFT | 首 token 平均时间。 | prefill 与排队成本的主要信号。 |
+| P99 TTFT | 接近尾部的首 token 时间。 | 用于暴露迁移到 `n=200` 后的排队或调度尖峰。 |
+| 平均 TPOT | 生成开始后每个输出 token 的平均时间。 | 单请求 decode 速度的主要信号。 |
+| P99 TPOT | 接近尾部的每输出 token 时间。 | 用于检查在更重活跃负载下 decode 延迟是否变得不稳定。 |
+| 输出 tokens/s | 基准墙钟时间内的聚合生成 token 吞吐量。 | 与 TTFT 和 TPOT 对比，以展示吞吐量/延迟权衡。 |
+
+有一点很关键：输出 tokens/s 并非仅 decode 速度。它是一种聚合基准吞吐量，包含花在 prefill、排队和 decode 上的时间。这就是为什么长提示词即便在 TPOT 仅温和上升时，也可能降低输出 tokens/s。
+
+## 基准工作流
+
+每次运行的变量让结果目录和基准文件自解释：
+
+```bash
+export MAX_MODEL_LEN="<server-context-window-tokens>"
+export MAX_NUM_SEQS="<maximum-active-sequences>"
+export MAX_NUM_BATCHED_TOKENS="<maximum-scheduled-tokens-per-step>"
+export RANDOM_INPUT_LEN="<benchmark-input-tokens>"
+export RANDOM_OUTPUT_LEN="<benchmark-output-tokens>"
+export MAX_CONCURRENCY="<benchmark-client-concurrency>"
+export GPU_MEMORY_UTILIZATION="<gpu-memory-fraction-for-vllm>"
+export NUM_PROMPTS="<number-of-benchmark-requests>"
+export SEED="<random-dataset-seed>"
+
+export RUN_CONFIG_ID="<descriptive-run-config-id>"
+export RUN_ID="<descriptive-run-config-id>-<timestamp>"
+export RESULT_DIR="$WORKDIR/results/$RUN_ID"
+export BENCH_FILE="$RESULT_DIR/bench-<descriptive-run-config-id>.txt"
+mkdir -p "$RESULT_DIR"
+```
+
+基准在 vLLM 容器内运行，针对 OpenAI 兼容的 chat 端点。
+
+```bash
+docker exec "$CONTAINER" vllm bench serve \
+  --backend openai-chat \
+  --endpoint /v1/chat/completions \
+  --model "$MODEL" \
+  --dataset-name random \
+  --random-input-len "$RANDOM_INPUT_LEN" \
+  --random-output-len "$RANDOM_OUTPUT_LEN" \
+  --num-prompts "$NUM_PROMPTS" \
+  --max-concurrency "$MAX_CONCURRENCY" \
+  --seed "$SEED" \
+  --ignore-eos \
+  --save-result \
+  --save-detailed \
+  --result-dir "$RESULT_DIR" \
+  --result-filename "bench-detailed.json" \
+  | tee "$BENCH_FILE"
+```
+
+之所以使用合成随机提示词，是因为它们避免暴露敏感数据。它们还让输入和输出长度可控，因此 `i1024/o128/c1` 在各次运行间意味着相同的基本负载形态。局限在于随机提示词不能代表自然语言质量、用户行为或应用层面的答案有用性。
+
+:::note[基准命令说明]
+`--ignore-eos` 告诉基准工具忽略早出的结束序列 token，使输出更接近请求的 `--random-output-len`。这让各次运行间的 TPOT 和输出吞吐量对比更干净。它是一个基准控制选项，不一定是生产服务策略。
+
+`tee "$BENCH_FILE"` 把基准输出既打印到终端，又把同样的输出写入基准文本文件。这让交互式运行保持可读，同时为后续报告保留一份副本。
+:::
+
+## 产物捕获
+
+每次运行后捕获证据：
+
+```bash
+docker image inspect "$IMAGE" \
+  --format '{{index .RepoDigests 0}}' \
+  > "$RESULT_DIR/image-digest.txt"
+nvidia-smi -q > "$RESULT_DIR/nvidia-smi-final.txt"
+docker logs "$CONTAINER" > "$RESULT_DIR/server.log" 2>&1
+docker inspect "$CONTAINER" > "$RESULT_DIR/container-config.json"
+```
+
+`image-digest.txt` 记录本次运行所用的精确 Docker 镜像身份。这很重要，因为诸如 `latest` 的标签会在不同基准会话间移动。
+`2>&1` 确保正常日志和错误信息都被保存到同一个文件。没有它，任何应用崩溃或错误信息会完全绕过你的日志文件，转而打印到屏幕上。
+
+可用 `grep` 从长日志中提取相关行。例如：
+
+```bash
+grep -iE "kv cache|maximum concurrency|memory|gpu|oom|error" "$RESULT_DIR/server.log"
+```
+
+说明：
+
+- `grep` 搜索文本文件。
+- `-i` 使搜索不区分大小写。
+- `-E` 启用扩展正则表达式。
+- `|` 字符表示“或”，因此该示例查找包含任一关键字的行。
+
+## 重复工作流
+
+基准实验使用如下循环：
+
+```text
+设置当前服务器端限制。
+启动 vLLM 容器。
+捕获启动证据和 metrics-before。
+在采样指标的同时运行基准。
+捕获基准输出、服务器日志、容器配置、GPU 状态和镜像摘要。
+停止并移除容器。
+按需更改服务器端限制。
+启动全新容器并再次基准测试。
+```
+
+捕获产物后停止并移除容器：
+
+```bash
+docker stop "$CONTAINER"
+docker rm "$CONTAINER"
+```
+
+这很重要，因为 `--max-model-len`、`--max-num-seqs`、`--max-num-batched-tokens` 和 `--gpu-memory-utilization` 是服务器启动选择。更改这些值需要一个全新的 vLLM 服务器进程。仅基准相关的值（如 `--random-input-len`、`--random-output-len` 和 `--max-concurrency`）只有在已运行服务器对新形态有足够容量时，才能在基准命令之间更改。
+
+## 理论观察
+
+| 服务组件 | 理论压力 | 指标中的预期 |
+| :--- | :--- | :--- |
+| Prefill | 注意力分数分量随提示词长度 $N$ 按 $O(N^2)$ 缩放，而其他每 token 工作更接近 $O(N)$。 | TTFT 应随输入长度强烈上升。实测比率仍可能低于纯 $N^2$ 比率，因为 TTFT 是若干成本之和。 |
+| Decode 注意力 | 每个新 token 在现有缓存上下文上做注意力，因此每个生成 token 的注意力工作随当前上下文长度按 $O(N)$ 缩放。 | 随上下文增长，TPOT 的上升应比 TTFT 温和得多。 |
+
+## 代码与日志
+
+实验使用三条标准阶梯外加一条诊断：
+
+| 实验 | 改变了什么 | 为何测试 |
+| :--- | :--- | :--- |
+| 输入长度 | `i128`、`i512`、`i1024`、`i1800`。 | 在 2048 上下文限制下度量 prefill 增长。 |
+| 上下文限制 | 4096、8192、16384 最大上下文。 | 在单卡上对逐步更大的服务形态进行极限测试。 |
+| 并发 | 基准并发 1、2、4、8。 | 度量批处理与排队。 |
+
+### 输入长度阶梯
+
+以下所有运行使用 `--max-model-len 2048`、`--max-num-seqs 1`、`--max-num-batched-tokens 2048`、`--gpu-memory-utilization 0.82`、`--num-prompts 200` 和 `--seed 0`。
+
+| 输入 | 输出 | 输出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128 | 128 | 76.89 | 104.68 ms | 104.65 ms | 12.28 ms | 12.52 ms |
+| 512 | 128 | 70.80 | 229.99 ms | 263.46 ms | 12.42 ms | 13.15 ms |
+| 1024 | 128 | 61.93 | 444.17 ms | 456.24 ms | 12.77 ms | 12.93 ms |
+| 1800 | 128 | 52.49 | 792.38 ms | 822.95 ms | 12.96 ms | 13.17 ms |
+
+观察到的缩放：
+
+| 变化 | 输入比率 | 纯 $O(N^2)$ 注意力比率 | 平均 TTFT 比率 | 平均 TPOT 比率 |
+| :--- | ---: | ---: | ---: | ---: |
+| `128 -> 512` | 4.00x | 16.00x | 2.20x | 1.01x |
+| `512 -> 1024` | 2.00x | 4.00x | 1.93x | 1.03x |
+| `1024 -> 1800` | 1.76x | 3.09x | 1.78x | 1.01x |
+| `128 -> 1800` | 14.06x | 197.75x | 7.57x | 1.06x |
+
+方向与预期的 prefill 成本模式一致：更长的提示词主要损害 TTFT，因为 prefill 必须处理整个提示词并在第一个输出 token 出现前写入 KV cache。确切的曲线在该范围内并非二次。例如，自注意力只是 transformer 层的一部分；模型在注意力前后还做每 token 变换，而这些部分更接近 $O(N)$ 而非 $O(N^2)$。这是实测 TTFT 强烈增长但仍低于纯二次注意力比率的一个可能原因。
+
+### 上下文限制阶梯
+
+上下文限制阶梯评估长上下文部署的运营极限，而非孤立的输入缩放。因此结果应被读作一次运行包络测试：当 vLLM 被要求在单卡上支持更大上下文窗口时，服务配置变得多么昂贵？
+
+16384 上下文形态在 `--gpu-memory-utilization 0.82` 下于引擎启动期间失败。错误发生在 vLLM 初始化 KV-cache 容量时。为服务一个完整的 16384-token 请求，vLLM 估算需要 0.56 GiB 的 KV-cache 内存，但在模型加载、性能分析、CUDA graph 内存及其他运行时预留之后仅剩 0.23 GiB 可用。在该内存预算下，vLLM 估算最大支持的模型长度为 5808 token。将 `gpu-memory-utilization` 提升至 `0.90` 给了 vLLM 更大的预留预算，使 16384 运行得以启动，代价是可用 VRAM 余量减少。下方的对比表报告成功的 `gpu-memory-utilization 0.90` 运行；全部使用基准并发 1 和 200 条提示词。
+
+| 最大上下文 | 输入 | 输出 | 输出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT | VLLM 内存 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4096 | 2048 | 128 | 48.26 | 968.22 ms | 984.73 ms | 13.26 ms | 13.49 ms | 8626 MiB |
+| 8192 | 4096 | 128 | 30.96 | 2341.79 ms | 2401.46 ms | 14.11 ms | 14.39 ms | 9136 MiB |
+| 16384 | 8192 | 128 | 15.21 | 6402.78 ms | 6626.26 ms | 15.84 ms | 16.48 ms | 9876 MiB |
+
+观察到的效果不仅是性能变慢；它表明最大上下文形态已接近该 GPU 的实际极限。随着服务上下文形态增大，平均 TTFT 从 4096 上下文时的 968.22 ms 升至 16384 上下文时的 6402.78 ms，而输出吞吐量从 48.26 跌至仅 15.21 输出 tokens/s。对于一个交互式服务目标而言该吞吐量非常低，尤其因为该运行还要求 `gpu-memory-utilization 0.90`，几乎没有留下 VRAM 余量。平均 TPOT 上升温和得多，从 13.26 ms 升至 15.84 ms，因为 decode 复用 prefill 期间创建的 KV cache，而不是为每个生成 token 重新计算整个提示词。实际结论是：16384 上下文是一次极限探测，并非该 RTX 2080 Ti 设置的合理工作点。
+
+VLLM 内存列应被解读为常驻进程内存，而非实时 KV-cache 用量。增大 `--max-model-len` 要求 vLLM 规划更大的可能 KV-cache 包络，但所报 MiB 值还包括模型权重、CUDA/运行时工作区、性能分析分配以及内存池行为。
+
+### 并发阶梯
+
+并发阶梯使用相同负载形态 `i1024/o128`，同时把基准并发从 1 增加到 8。服务器以 `--max-num-seqs 8`、`--max-num-batched-tokens 8192`、`--gpu-memory-utilization 0.82` 和 `--num-prompts 200` 启动，因此对比聚焦于批处理、排队和 KV-cache 压力。
+
+| 基准并发 | 输出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT | 最大运行 | 最大等待 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 62.67 | 431.37 ms | 447.43 ms | 12.68 ms | 12.84 ms | 1 | 0 |
+| 2 | 97.91 | 638.89 ms | 867.79 ms | 15.55 ms | 17.47 ms | 2 | 0 |
+| 4 | 141.96 | 1326.18 ms | 1693.87 ms | 17.95 ms | 25.76 ms | 4 | 0 |
+| 8 | 140.41 | 4943.71 ms | 9813.48 ms | 17.92 ms | 25.49 ms | 4 | 4 |
+
+改变并发意味着基准同时向服务器发送多个请求。vLLM 随后可把来自不同请求的工作批在一起，使 GPU 在每个调度步骤中有更多工作可处理。这就是为什么即使每个单独请求变慢，聚合输出 tokens/s 仍会上升：服务器在并行地为更多请求产出 token。
+
+代价是每个请求现在要与其他活跃请求共享 GPU 算力、内存带宽、调度器时间和 KV-cache 容量。TTFT 上升，因为请求可能要排在自己的 prefill 完成之前等待其他提示词。TPOT 也上升，因为每个 decode 步骤不再只服务一个序列；服务器在更庞大的活跃 batch 中推进，并为多个请求读取 KV-cache 块。
+
+P99 TPOT 值显示 decode 延迟也变得更不稳定。在 `c1` 时，P99 TPOT 接近平均 TPOT，12.84 ms 对 12.68 ms。在 `c4` 时，P99 TPOT 升至 25.76 ms，而平均 TPOT 为 17.95 ms。这意味着大多数 token 按平均节奏生成，但某些 decode 步骤慢得多。例如，这可能发生在调度器步骤工作不均、活跃请求处于 prefill/decode 的不同阶段，或 KV-cache 内存流量在批处理下变得更突发时。
+
+理论上的 KV-cache 内存需求随活跃序列大致线性增长。如果服务器能让更多请求保持运行，批处理可提升 GPU 利用率和聚合输出 tokens/s。但一旦 GPU 饱和，或 KV-cache 池耗尽，更多客户端并发主要变成排队。
+
+观察到的模式符合该预期：
+
+| 变化 | 输出 tok/s 变化 | 平均 TTFT 变化 | 调度器信号 | 解释 |
+| :--- | :--- | :--- | :--- | :--- |
+| `c1 -> c2` | 62.67 至 97.91 | 431.37 ms 至 638.89 ms | 2 运行，0 等待 | GPU 利用率更好，延迟代价适中。 |
+| `c2 -> c4` | 97.91 至 141.96 | 638.89 ms 至 1326.18 ms | 4 运行，0 等待 | `gpuutil0.82` 下测得的最佳吞吐量，但 TTFT 约翻倍。 |
+| `c4 -> c8` | 141.96 至 140.41 | 1326.18 ms 至 4943.71 ms | 4 运行，4 等待，KV 使用率 100% | 吞吐量饱和；额外请求排队而非提升有用工作。 |
+
+这也解释了为何外部内存快照可能具有误导性。vLLM 的 PagedAttention 从启动时规划好的内存池中分配 KV-cache 块。因此 `nvidia-smi` 大多报告 vLLM 已预留的常驻内存加上瞬时运行时内存，而非每个并发级别的精确实时 KV-cache 占用。vLLM 的内部指标显示了真实压力：`c8` 达到 100% GPU KV-cache 使用率并有四个等待请求。
+
+### C8 GPU 内存诊断
+
+此诊断仅改变 `--gpu-memory-utilization`：
+
+| GPU 内存设置 | 输出 tok/s | 平均 TTFT | P99 TTFT | 平均 TPOT | P99 TPOT | KV cache 大小 | 最大满上下文并发 | 最大运行 | 最大等待 | KV 使用率峰值 | VLLM 内存 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | ---: | :--- | ---: |
+| 0.82 | 140.41 | 4943.71 ms | 9813.48 ms | 17.92 ms | 25.49 ms | 7,314 tokens | 3.57x | 4 | 4 | 100% | 8196 MiB |
+| 0.90 | 180.69 | 2800.85 ms | 7940.99 ms | 22.56 ms | 40.78 ms | 21,357 tokens | 10.43x | 8 | 0 | 66.7% | 9820 MiB |
+
+这隔离了 `c8/gpuutil0.82` 排队结果的原因。在 `0.82` 时，vLLM 仅有 7314 KV-cache token 可用，并报告对 2048-token 请求的最大满上下文并发为 3.57x。基准希望八个并发请求，所以调度器一次只能运行四个，留下四个等待。在 `0.90` 时，vLLM 规划了 21,357 KV-cache token，能运行全部八个请求，吞吐量升至 180.69 输出 tok/s。
+
+诊断还显示了提高该内存设置的代价。相比受限的 `c8/0.82` 运行，TTFT 有所改善，因为等待的请求更少，但 TPOT 从 17.92 ms 恶化到 22.56 ms，P99 TPOT 急剧恶化。服务器同时做更多活跃 decode 工作，这提升了聚合吞吐量，却让单请求 decode 更不稳定。GPU 常驻内存也升至 9820 MiB，在这块 11 GB 的 GPU 上几乎没有余量。
+
+## 参考文献
+
+- [vLLM benchmark serve CLI](https://docs.vllm.ai/en/latest/cli/bench/serve/)

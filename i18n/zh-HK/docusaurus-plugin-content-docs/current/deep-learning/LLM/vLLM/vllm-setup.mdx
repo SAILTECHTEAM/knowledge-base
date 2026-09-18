@@ -1,0 +1,128 @@
+---
+sidebar_position: 3
+title: vLLM 部署設定
+description: vLLM 服務的通用概念，以及用於執行 OpenAI 相容 LLM 伺服器的 Docker 部署流程。
+---
+
+# vLLM 部署設定
+
+本頁講解 vLLM 的服務概念，以及執行 OpenAI 相容 LLM 伺服器的通用 Docker 部署流程。硬體相關的基準測試設定與發現另行記錄在 [vLLM 實驗與發現](./vllm-experimentation-findings) 中。
+
+## vLLM 關鍵理念
+
+vLLM 是一個面向高吞吐 LLM 服務的推論與服務平台。其關鍵理念包括 PagedAttention、連續批次處理、OpenAI 相容服務、量化支援，以及諸如 `--max-num-seqs` 和 `--max-num-batched-tokens` 的排程器控制項。
+
+| 理念 | 含義 | 為何重要 |
+| :--- | :--- | :--- |
+| PagedAttention | KV cache 被切分為固定大小的區塊，類似於作業系統中的分頁。一個請求的邏輯 token 歷史可以對映到非連續的物理 GPU 記憶體區塊。 | 減少 KV-cache 碎片，讓 vLLM 更高效地使用 GPU 記憶體。 |
+| 連續批次處理 | 請求以迭代層級排程。新請求可在其他請求完成時加入，而不必等待固定批次完成。 | 當請求長度不一時提升聚合吞吐量。 |
+| OpenAI 相容服務 | vLLM 可以在你的伺服器上託管開源模型，並用一個模仿 OpenAI 精確端點結構與資料格式的網路層包裝它。 | 現有的 OpenAI 風格客戶端、SDK、指令稿和基準工具只需更換 base URL、模型名稱和認證設定即可複用。 |
+| 量化支援 | vLLM 可以服務受支援的量化模型格式，其中模型權重以比 FP16 或 BF16 更少的位元儲存，例如受支援的 AWQ 檢查點。 | 降低靜態權重記憶體，可能讓更大模型塞進更小的 GPU，但並不消除 KV-cache、激活、排程器或長上下文的記憶體開銷。 |
+| Prefill/decode 排程 | vLLM 在 `--max-num-seqs` 和 `--max-num-batched-tokens` 等限制下排程提示詞 prefill 與逐 token 的 decode 工作。 | 解釋了為何更高並發能在提升總輸出 tokens/s 的同時增加 TTFT 與 TPOT。 |
+| 分塊 prefill（chunked prefill） | 在啟用且被目前設定支援時，長提示詞可跨多個排程迭代切分。 | 有助於避免一個長提示詞獨佔排程器。 |
+
+:::caution[vLLM 與 SGLang]
+SGLang 是另一個可行的 LLM 服務框架，尤其適合受益於其結構化生成與程式設計模型的工作負載。然而對於 Turing 架構 GPU，硬體支援才是關鍵問題：SGLang [PR #9207](https://github.com/sgl-project/sglang/pull/9207) 移除了 `sm75` 支援，導致該硬體路徑不受支援或不可靠。
+:::
+
+## 常用部署變數
+
+本部署使用容器化的 vLLM OpenAI 相容伺服器。請將 `<model-repository>` 和 `<gpu-id>` 等佔位值替換為目標環境的實際值。
+
+```bash
+export WORKDIR="<workdir>"
+export MODEL="<model-repository>"
+export IMAGE="vllm/vllm-openai:latest"
+export GPU_DEVICE="<gpu-id>"
+export CONTAINER="<container-name>"
+export CACHE_VOLUME="<cache-volume-name>"
+
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+docker volume create "$CACHE_VOLUME"
+```
+
+`CACHE_VOLUME` 是一個命名的 Docker 磁碟區，用於 Hugging Face 模型快取。容器在 `/root/.cache/huggingface` 處看到它，但 Docker 把資料儲存在可移除容器檔案系統之外。
+
+```text
+Docker 磁碟區: <cache-volume-name>
+         |
+         v
+容器路徑: /root/.cache/huggingface
+         |
+         v
+已下載的模型檔案和分詞器檔案
+```
+
+這很重要，因為 vLLM 容器在伺服器端限制變更時經常被刪除並重建。沒有持久化快取磁碟區，刪除容器也會一併刪除該容器內已下載的模型快取。有了該磁碟區，下一個容器就能複用模型檔案，而不必重新下載。
+
+快取磁碟區有助於啟動和可重現性，但在伺服器載入完成後並不會直接改變基準測試指標：
+
+| 方面 | 快取磁碟區的影響 |
+| :--- | :--- |
+| 模型下載時間 | 首次執行後通常更快，因為檔案被複用。 |
+| 網路可靠性 | 更好，因為重複測試不依賴重複下載。 |
+| 容器重啟流程 | 更乾淨，因為容器可被移除而模型檔案仍保留。 |
+| TTFT、TPOT、輸出 tokens/s、VRAM 用量 | 不受直接影響。 |
+
+## 拉取映像
+
+啟動伺服器前先拉取映像：
+
+```bash
+docker pull "$IMAGE"
+```
+
+諸如 `latest` 的 Docker 標籤會移動。對基準測試工作，請在建立針對本次執行的結果目錄後，把精確的映像摘要記錄到實驗產物中。
+
+## 啟動 vLLM 伺服器
+
+伺服器端限制是啟動時的選擇。在啟動容器前設定它們：
+
+```bash
+export MAX_MODEL_LEN="<max-context-tokens>"
+export MAX_NUM_SEQS="<max-active-sequences>"
+export MAX_NUM_BATCHED_TOKENS="<max-batched-tokens>"
+export GPU_MEMORY_UTILIZATION="<gpu-memory-fraction>"
+export DTYPE="<dtype>"
+```
+
+按目前伺服器端限制啟動伺服器：
+
+```bash
+docker run -d \
+  --name "$CONTAINER" \
+  --gpus "\"device=${GPU_DEVICE}\"" \
+  --mount type=volume,source="$CACHE_VOLUME",target=/root/.cache/huggingface \
+  "$IMAGE" \
+    --model "$MODEL" \
+    --dtype "$DTYPE" \
+    --max-model-len "$MAX_MODEL_LEN" \
+    --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+    --max-num-seqs "$MAX_NUM_SEQS" \
+    --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS"
+```
+
+## 重要 vLLM 旗標
+
+| 旗標 | 用途 | 何時調整 |
+| :--- | :--- | :--- |
+| `--model` | 載入模型倉庫或檢查點。 | 服務不同的 Hugging Face 倉庫、本地檢查點或模型別名時更換。 |
+| `--dtype` | 設定執行 dtype。 | 選擇被模型、GPU 架構和 vLLM 建置支援的 dtype。 |
+| `--max-model-len` | 設定計畫的最大上下文長度。 | 僅在需要更長提示詞且有足夠 KV-cache 記憶體時調大。 |
+| `--gpu-memory-utilization` | 控制 vLLM 可使用的 GPU 記憶體比例。 | 調高以給 vLLM 分配更多記憶體；調低以為其他行程留出更多餘量。 |
+| `--max-num-seqs` | 限制每個排程器迭代中的活躍序列數。 | 調大以允許更多活躍請求，同時關注 TTFT、TPOT 和 KV-cache 壓力。 |
+| `--max-num-batched-tokens` | 限制一個排程器迭代中處理的 token 數。 | 在改變上下文長度、prefill 負載或批次行為時調校。 |
+
+
+## 參考文獻
+
+- [vLLM 文件](https://docs.vllm.ai/en/latest/)
+- [vLLM 引擎參數](https://docs.vllm.ai/en/latest/configuration/engine_args/)
+- [vLLM Docker 部署](https://docs.vllm.ai/en/latest/deployment/docker/)
+- [vLLM OpenAI 相容伺服器](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/)
+- [vLLM PagedAttention 部落格](https://vllm.ai/blog/2023-06-20-vllm)
+- [PagedAttention 論文](https://arxiv.org/abs/2309.06180)
+- [NVIDIA CUDA GPU 算力表](https://developer.nvidia.com/cuda/gpus)
+- [SGLang sm75 棄用 RFC](https://github.com/sgl-project/sglang/issues/6006)
+- [SGLang PR #9207: feat: remove sm75](https://github.com/sgl-project/sglang/pull/9207)
