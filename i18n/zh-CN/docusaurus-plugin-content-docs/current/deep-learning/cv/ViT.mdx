@@ -45,7 +45,7 @@ description: "Vision Transformer 的架构、训练方式及其与 CNN 的差异
 
 ## 分类 Token（CLS Token）
 
-1. 随机初始化与模型输入相同维度的 `CLS` 参数（`1×768`）。
+1. 随机初始化与 token embedding 相同维度的 `CLS` 参数（`1×768`）。
 2. 每个 batch 都会复制同一个 `CLS token`。batch 是同时处理的图像数量；例如 `batch=32` 代表同时处理 32 张图像，通常会计算并平均 32 个 loss 后进行反向传播。
 3. 该参数会通过反向传播更新。
 
