@@ -73,17 +73,17 @@ ATSS broke fixed constant thresholds like global 0.5. Its logic: no human-drawn 
 
 ### The ATSS procedure
 
-1. For any ground-truth box $G$, take the $k$ candidate slots closest to $G$'s center by geometric distance on each pyramid level (usually $k=9$). With $L$ levels, the object gathers $k \times L$ trial candidates image-wide.
+1. For any ground-truth box $G$, take the $k$ candidate units closest to $G$'s center by geometric distance on each pyramid level (usually $k=9$). With $L$ levels, the object gathers $k \times L$ trial candidates image-wide.
 2. Compute their actual IoU set with $G$: $\mathcal{D} = \{\mathrm{IoU}_1, \mathrm{IoU}_2, \dots, \mathrm{IoU}_{k \times L}\}$.
 3. Compute the set mean $m = \frac{1}{|\mathcal{D}|} \sum_{i} \mathrm{IoU}_i$ and standard deviation $v = \sqrt{\frac{1}{|\mathcal{D}|} \sum_{i} (\mathrm{IoU}_i - m)^2}$.
 4. The object's bespoke positive threshold is:
    $$
    t_{\mathrm{ATSS}} = m + v
    $$
-5. Only slots with IoU at or above $t_{\mathrm{ATSS}}$ **and** centers inside the true box become positives.
+5. Only units with IoU at or above $t_{\mathrm{ATSS}}$ **and** centers inside the true box become positives.
 
 :::tip[The physics of the ATSS threshold]
-The mean $m$ measures how well current preset slots geometrically fit this object's scale: large nearby objects overlap heavily overall, so the bar rises automatically; tiny distant objects overlap poorly everywhere, so the bar drops adaptively and no global one-size-fits-all cutoff ever starves small objects. The standard deviation $v$ measures which pyramid level suits the object best: a well-matched level contributes a few extreme IoUs, widening variance and tightening the bar to cherry-pick elite samples; mediocre levels everywhere shrink variance and avoid missing potential samples.
+The mean $m$ measures how well current preset units geometrically fit this object's scale: large nearby objects overlap heavily overall, so the bar rises automatically; tiny distant objects overlap poorly everywhere, so the bar drops adaptively and no global one-size-fits-all cutoff ever starves small objects. The standard deviation $v$ measures which pyramid level suits the object best: a well-matched level contributes a few extreme IoUs, widening variance and tightening the bar to cherry-pick elite samples; mediocre levels everywhere shrink variance and avoid missing potential samples.
 :::
 
 ATSS still limits itself: dynamically computed bars derive entirely from **initial static geometric IoUs**. As feature weights evolve through iterations, a point already capable of top-quality boxes under current parameters stays rejected over a slightly low prior-template IoU. Further gains require judging models by "how well do you actually measure right now".
@@ -94,21 +94,21 @@ Once assignment incorporates the network's live predictive state, label assignme
 
 ### Cost-matrix optimal transport (SimOTA)
 
-SimOTA frames assignment as cost minimization: given $M$ ground truths $\{G_1, \dots, G_M\}$ and $N$ prediction slots $\{S_1, \dots, S_N\}$ in an image.
+SimOTA frames assignment as cost minimization: given $M$ ground truths $\{G_1, \dots, G_M\}$ and $N$ prediction units $\{S_1, \dots, S_N\}$ in an image.
 
-Each slot $S_j$'s difficulty in serving object $G_i$ is measured by an explicit matching cost:
+Each unit $S_j$'s difficulty in serving object $G_i$ is measured by an explicit matching cost:
 
 $$
 C_{ij} = L_{\mathrm{cls}}(p_j, c_i) + \lambda L_{\mathrm{reg}}(b_j, g_i)
 $$
 
-- $p_j$ and $c_i$ are slot $S_j$'s current class probabilities and the object's true class; $L_{\mathrm{cls}}$ measures classification difficulty;
+- $p_j$ and $c_i$ are unit $S_j$'s current class probabilities and the object's true class; $L_{\mathrm{cls}}$ measures classification difficulty;
 - $b_j$ and $g_i$ are the current decoded box coordinates and ground-truth coordinates; $L_{\mathrm{reg}}$ is a regression loss (e.g. CIoU);
 - $\lambda$ balances classification and localization weights.
 
 Beyond cost scoring, SimOTA adds **dynamic $k$** deciding how many positives each object gets automatically: take the top-10 image-wide predicted-box IoUs with $G_i$, sum, and floor: $k_i = \max\bigl(1, \bigl\lfloor \sum_{m=1}^{10} \mathrm{IoU}_{im} \bigr\rfloor\bigr)$. Easily recognized objects earn larger $k_i$ for multi-point collaborative learning; fuzzy hard objects shrink $k_i$ adaptively to keep low-quality points from polluting gradients.
 
-When two overlapping objects contend for candidate slots, the global cost matrix $C_{ij}$ assigns each slot uniquely to the object with smaller combined predictive cost (higher fit).
+When two overlapping objects contend for candidate units, the global cost matrix $C_{ij}$ assigns each unit uniquely to the object with smaller combined predictive cost (higher fit).
 
 ### Task-aligned joint evaluation (TAL)
 
@@ -128,11 +128,11 @@ During assignment, TAL picks positives among local candidates directly by $t$, n
 
 ## One-to-many and NMS: symbiosis and contradiction
 
-From static geometry through ATSS to SimOTA and TAL, one substrate feature persists throughout — **one-to-many assignment**. Every real object always maps to multiple spatial slots in training.
+From static geometry through ATSS to SimOTA and TAL, one substrate feature persists throughout — **one-to-many assignment**. Every real object always maps to multiple spatial units in training.
 
 ### One-to-many gains and prices
 
-- **Gain**: early in training with random parameters, multiple positive slots per object emit abundant positive gradients, greatly accelerating backbone and head feature convergence.
+- **Gain**: early in training with random parameters, multiple positive units per object emit abundant positive gradients, greatly accelerating backbone and head feature convergence.
 - **Price**: since training orders neighboring grids to predict the same object positively together, those positions naturally emit high-scoring candidate boxes together at inference. Around adjacent or occluded objects, overlap zones pile up many high-confidence, slightly drifted redundant boxes.
 
 Clearing them forces **non-maximum suppression (NMS)** as mandatory post-processing.
@@ -154,7 +154,7 @@ To cut inference-side NMS completely, redundant responses must die at the traini
 
 ### Hungarian bipartite matching
 
-In one-to-one systems, the network emits $N$ equal query slots (e.g. $N=300$); the object set pads to $N$ with empty class $\varnothing$. The Hungarian algorithm finds the global bijection $\sigma \in \mathfrak{S}_N$ minimizing total match cost across all objects and slots:
+In one-to-one systems, the network emits $N$ equal query units (e.g. $N=300$); the object set pads to $N$ with empty class $\varnothing$. The Hungarian algorithm finds the global bijection $\sigma \in \mathfrak{S}_N$ minimizing total match cost across all objects and units:
 
 $$
 \begin{aligned}
@@ -163,15 +163,15 @@ $$
 \end{aligned}
 $$
 
-The crux: **each real object signs exactly one minimum-cost slot among all $N$ image-wide slots; every other slot takes background-$\varnothing$ punishment.**
+The crux: **each real object signs exactly one minimum-cost unit among all $N$ image-wide units; every other unit takes background-$\varnothing$ punishment.**
 
-If two slots chase one object, matching awards it to the better performer while forcing the other into background. Its high classification score earns no reward — only strong background suppression loss.
+If two units chase one object, matching awards it to the better performer while forcing the other into background. Its high classification score earns no reward — only strong background suppression loss.
 
-Under sustained exclusive backpropagation, the network learns self-play during training: slots sense each other through self-attention, spontaneously agreeing on one representative per object while the rest press their scores into background. **Inference needs only a confidence threshold filtering background — no NMS, naturally.**
+Under sustained exclusive backpropagation, the network learns self-play during training: units sense each other through self-attention, spontaneously agreeing on one representative per object while the rest press their scores into background. **Inference needs only a confidence threshold filtering background — no NMS, naturally.**
 
 ### The optimization price of one-to-one
 
-Strict one-to-one assignment pays in **sparse positive gradients**. Among thousands of image-wide feature slots, each iteration grants positive regression signal to exactly as many slots as ground truths. Original DETR consequently needs longer training schedules to converge stably.
+Strict one-to-one assignment pays in **sparse positive gradients**. Among thousands of image-wide feature units, each iteration grants positive regression signal to exactly as many units as ground truths. Original DETR consequently needs longer training schedules to converge stably.
 
 ## Endgame confluence: dual assignment
 
@@ -181,7 +181,7 @@ Dual-assignment architectures share backbone and feature pyramid, splitting only
 
 ![Dual assignment: one-to-many auxiliary and one-to-one main branches share the backbone; inference keeps only the one-to-one branch](/img/cv_img/object-detection/dual-assignment.png)
 
-1. **One-to-many auxiliary branch**: TAL or SimOTA assigns multiple positive slots per object in training, computing auxiliary loss $\mathcal{L}_{\mathrm{o2m}}$ that feeds the shared backbone ample gradient updates for fast feature convergence;
+1. **One-to-many auxiliary branch**: TAL or SimOTA assigns multiple positive units per object in training, computing auxiliary loss $\mathcal{L}_{\mathrm{o2m}}$ that feeds the shared backbone ample gradient updates for fast feature convergence;
 2. **one-to-one main branch**: strict Hungarian one-to-one matching in training computes main loss $\mathcal{L}_{\mathrm{o2o}}$, fitting exclusive single-object-single-response prediction on backbone-supported features;
 3. **joint total loss**: $\mathcal{L}_{\mathrm{total}} = \mathcal{L}_{\mathrm{o2o}} + \alpha \mathcal{L}_{\mathrm{o2m}}$.
 
