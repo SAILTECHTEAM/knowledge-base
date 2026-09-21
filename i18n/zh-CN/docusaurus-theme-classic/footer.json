@@ -9,19 +9,19 @@
   },
   "link.item.label.Deep Learning": {
     "message": "Deep Learning",
-    "description": "The label of footer link with label=Deep Learning linking to /docs/category/deep-learning"
+    "description": "The label of footer link with label=Deep Learning linking to /deep-learning/fundamental/"
   },
   "link.item.label.Python Tutorial": {
     "message": "Python Tutorial",
-    "description": "The label of footer link with label=Python Tutorial linking to /docs/category/python-tutorial"
+    "description": "The label of footer link with label=Python Tutorial linking to /python-tutorial/"
   },
   "link.item.label.Git Tutorial": {
     "message": "Git Tutorial",
-    "description": "The label of footer link with label=Git Tutorial linking to /docs/category/git-tutorial"
+    "description": "The label of footer link with label=Git Tutorial linking to /git-tutorial/"
   },
   "link.item.label.Infrastructure": {
     "message": "Infrastructure",
-    "description": "The label of footer link with label=Infrastructure linking to /docs/category/devops--infrastructure"
+    "description": "The label of footer link with label=Infrastructure linking to /infra/architecture-overview"
   },
   "link.item.label.GitHub": {
     "message": "GitHub",

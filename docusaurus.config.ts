@@ -87,6 +87,7 @@ const config: Config = {
       'classic',
       {
         docs: {
+          routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           editUrl: 'https://github.com/SAILTECHTEAM/knowledge-base/tree/main/',
           remarkPlugins: [remarkMath],
@@ -109,12 +110,6 @@ const config: Config = {
       title: 'Knowledge Base',
       items: [
         {
-          type: 'docSidebar',
-          sidebarId: 'tutorialSidebar',
-          position: 'left',
-          label: 'Docs',
-        },
-        {
           type: 'localeDropdown',
           position: 'right',
         },
@@ -131,10 +126,10 @@ const config: Config = {
         {
           title: 'Sections',
           items: [
-            {label: 'Deep Learning', to: '/docs/deep-learning/fundamental/'},
-            {label: 'Python Tutorial', to: '/docs/python-tutorial/'},
-            {label: 'Git Tutorial', to: '/docs/git-tutorial/'},
-            {label: 'Infrastructure', to: '/docs/infra/architecture-overview'},
+            {label: 'Deep Learning', to: '/deep-learning/fundamental/'},
+            {label: 'Python Tutorial', to: '/python-tutorial/'},
+            {label: 'Git Tutorial', to: '/git-tutorial/'},
+            {label: 'Infrastructure', to: '/infra/architecture-overview'},
           ],
         },
         {

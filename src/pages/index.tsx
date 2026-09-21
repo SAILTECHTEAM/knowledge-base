@@ -20,22 +20,22 @@ const DefaultSectionList: SectionCardProps[] = [
   {
     title: 'Deep Learning',
     description: 'Computer Vision (YOLO series, CNN), object tracking (TrackNet), and fundamental concepts.',
-    link: '/docs/deep-learning/fundamental/',
+    link: '/deep-learning/fundamental/',
   },
   {
     title: 'Python Tutorial',
     description: 'Modern Python engineering practices and toolsets.',
-    link: '/docs/python-tutorial/',
+    link: '/python-tutorial/',
   },
   {
     title: 'Git Tutorial',
     description: 'Standardized Git workflows for professional teams.',
-    link: '/docs/git-tutorial/',
+    link: '/git-tutorial/',
   },
   {
     title: 'Infrastructure',
     description: 'Cloud-native architecture and development environments.',
-    link: '/docs/infra/architecture-overview',
+    link: '/infra/architecture-overview',
   },
 ];
 
