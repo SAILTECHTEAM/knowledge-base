@@ -50,6 +50,11 @@
   margin-bottom: var(--ifm-paragraph-margin-bottom);
 }
 
+.wide-table--dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .wide-table table {
   min-width: 1200px;
 }
