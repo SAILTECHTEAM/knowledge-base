@@ -14,6 +14,28 @@ YOLO 系列从 2015 年的 v1 持续演进到 2026 年的 v26，时间跨度超�
 在深入 YOLO 之前，建议先复习 [CNN 基础知识](/files/cv/CNN_Note_v2.pdf)，了解卷积层、池化与激活函数。
 :::
 
+## 系列内容规划
+
+### [YOLO 演进（1）：单阶段检测的起步](./v1-v3-single-stage-origins)
+
+第一篇聚焦 v1 到 v3，核心在于验证单阶段检测范式的可行性并确立基础框架。v1 采用空间网格与全连接层直接回归整图目标，推理速度极快，但在小目标检测和定位精度上表现粗糙。v2 引入批归一化、高分辨率微调、Anchor 机制与多尺度训练，解决了深层单阶段网络的训练与优化难题。到了 v3，Darknet-53 残差骨干网与三尺度特征预测基本确立了“Backbone + 多尺度 Neck + Detection Head”的经典范式，同时沿用了 Anchor 机制、一对多正负样本匹配与 NMS 后处理。
+
+### [YOLO 演进（2）：方法集成及工程生态](./v4-v5-integration)
+
+第二篇梳理 v4 到 v5，核心在于探索成熟技巧的工程集成上限。这一阶段集中涌现了 Mosaic 数据增强、CSP（Cross Stage Partial，跨阶段部分连接）、PAN（Path Aggregation Network，路径聚合网络）与 CIoU 损失等技术。这些方案的共同逻辑在于：在训练阶段增加计算以提升表征能力，尽量不增加或极少增加推理开销。学术团队更侧重精度极限的挖掘，而 Ultralytics 则更注重代码生态的易用性与工程部署效率。
+
+### [YOLO 演进（3）：硬件友好与训练细化](./v6-v7-hardware-training)
+
+第三篇讨论 v6 到 v7，核心在于打破只关注理论精度的局限，将网络结构、硬件执行效率与训练策略深度协同。v6 遵循硬件友好原则重构网络：训练期采用多分支结构增强表征，推理前重参数化为单路 $3 \times 3$ 卷积，并在设计阶段就将量化与推理引擎的算子支持纳入考量。v7 则在训练策略上进一步细化，系统探讨了重参数化模块的放置位置、深度监督下 Lead Head 与 Aux Head 的软标签分配机制，以及模型缩放时的宽度与深度协同配比。到 v7 阶段，密集预测与 NMS 带来的端到端延迟和超参数负担日益显著，演进焦点逐步转向样本匹配与 Head 结构。
+
+### [YOLO 演进（4）：anchor 去除与 NMS 可选化](./anchor-free-nms-optional)
+
+第四篇分析 YOLOX 以及 v8 到 v11，核心在于摆脱 Anchor 先验并尝试将 NMS 从推理必需项转变为可选项。YOLOX 较早转向 Anchor-free 路线，解耦分类与回归分支，并引入 SimOTA 进行动态样本匹配。v8 将该路线进一步铺开，采用任务对齐分配（Task-Aligned Assigner）与 DFL（Distribution Focal Loss）边界框分布表征。v9 提出可编程梯度信息（PGI），以缓解深层特征的信息瓶颈。v10 引入双标签分配机制：训练时保留一对多分支以确保召回率，推理时直接使用一对一分支，从而省去 NMS 计算。v11 则重点扩展了多任务统一支持，底层检测机制未作大幅改动。本篇内容与样本匹配、Head 设计紧密相关，可对照 [目标检测解构（3）：Label Assignment](../deconstruction/label-assignment) 与 [目标检测解构（5）：分类置信度与 Detection Head](../deconstruction/classification-head) 阅读。
+
+### [YOLO 演进（5）：注意力引入与部署简化](./attention-deployment)
+
+第五篇解析 v12 与后续演进，核心在于探讨实时检测的速度约束下注意力机制的应用边界。v12 采用按区域切分的局部注意力机制，使模型在支持任意长宽比输入的同时，将计算复杂度控制在可实时运行的范围内；通过残差聚合网络中的缩放残差连接缓解注意力模块带来的收敛困难；并通过调小 MLP 比例、去除显式位置编码、结合大核可分离卷积来平衡精度与延迟。v26 进一步精简了结构：移除 DFL 表征以降低解码开销，并将 NMS 设为可选配置，重点优化 CPU 推理速度与边缘设备部署体验。本篇最后还会对照 RT-DETR，阐明演进至今的 YOLO 与基于 Transformer 的检测器在底层原理上已高度趋同，现阶段的差异主要体现在实时延迟控制、模型分级粒度以及边缘部署生态上。
+
 ## 演进时间线
 
 | 版本 | 年份 | 关键创新 | 学习笔记 |
@@ -34,24 +56,12 @@ YOLO 系列从 2015 年的 v1 持续演进到 2026 年的 v26，时间跨度超�
 
 ## 参考论文
 
-- [YOLOv1 论文](https://arxiv.org/abs/1506.02640)
-- [YOLOv2 论文](https://arxiv.org/abs/1612.08242)
-- [YOLOv3 论文](https://arxiv.org/abs/1804.02767)
-- [YOLOv4 论文](https://arxiv.org/abs/2004.10934)
-- [YOLOX 论文](https://arxiv.org/abs/2107.08430)
-- [YOLOv7 论文](https://arxiv.org/abs/2207.02696)
-- [YOLOv9 论文](https://arxiv.org/abs/2402.13616)
-- [YOLOv10 论文](https://arxiv.org/abs/2405.14458)
-- [YOLOv12 论文](https://arxiv.org/abs/2502.12524)
-
-## 系列内容规划
-
-第一篇聚焦 v1 到 v3，核心在于验证单阶段检测范式的可行性并确立基础框架。v1 采用空间网格与全连接层直接回归整图目标，推理速度极快，但在小目标检测和定位精度上表现粗糙。v2 引入批归一化、高分辨率微调、Anchor 机制与多尺度训练，解决了深层单阶段网络的训练与优化难题。到了 v3，Darknet-53 残差骨干网与三尺度特征预测基本确立了“Backbone + 多尺度 Neck + Detection Head”的经典范式，同时沿用了 Anchor 机制、一对多正负样本匹配与 NMS 后处理。参见 [YOLO 演进（1）：单阶段检测的起步](./v1-v3-single-stage-origins)。
-
-第二篇梳理 v4 到 v5，核心在于探索成熟技巧的工程集成上限。这一阶段集中涌现了 Mosaic 数据增强、CSP（Cross Stage Partial，跨阶段部分连接）、PAN（Path Aggregation Network，路径聚合网络）与 CIoU 损失等技术。这些方案的共同逻辑在于：在训练阶段增加计算以提升表征能力，尽量不增加或极少增加推理开销。学术团队更侧重精度极限的挖掘，而 Ultralytics 则更注重代码生态的易用性与工程部署效率。参见 [YOLO 演进（2）：方法集成及工程生态](./v4-v5-integration)。
-
-第三篇讨论 v6 到 v7，核心在于打破只关注理论精度的局限，将网络结构、硬件执行效率与训练策略深度协同。v6 遵循硬件友好原则重构网络：训练期采用多分支结构增强表征，推理前重参数化为单路 $3 \times 3$ 卷积，并在设计阶段就将量化与推理引擎的算子支持纳入考量。v7 则在训练策略上进一步细化，系统探讨了重参数化模块的放置位置、深度监督下 Lead Head 与 Aux Head 的软标签分配机制，以及模型缩放时的宽度与深度协同配比。到 v7 阶段，密集预测与 NMS 带来的端到端延迟和超参数负担日益显著，演进焦点逐步转向样本匹配与 Head 结构。参见 [YOLO 演进（3）：硬件友好与训练细化](./v6-v7-hardware-training)。
-
-第四篇分析 YOLOX 以及 v8 到 v11，核心在于摆脱 Anchor 先验并尝试将 NMS 从推理必需项转变为可选项。YOLOX 较早转向 Anchor-free 路线，解耦分类与回归分支，并引入 SimOTA 进行动态样本匹配。v8 将该路线进一步铺开，采用任务对齐分配（Task-Aligned Assigner）与 DFL（Distribution Focal Loss）边界框分布表征。v9 提出可编程梯度信息（PGI），以缓解深层特征的信息瓶颈。v10 引入双标签分配机制：训练时保留一对多分支以确保召回率，推理时直接使用一对一分支，从而省去 NMS 计算。v11 则重点扩展了多任务统一支持，底层检测机制未作大幅改动。本篇内容与样本匹配、Head 设计紧密相关，可对照 [目标检测解构（3）：Label Assignment](../deconstruction/label-assignment) 与 [目标检测解构（5）：分类置信度与 Detection Head](../deconstruction/classification-head) 阅读。参见 [YOLO 演进（4）：anchor 去除与 NMS 可选化](./anchor-free-nms-optional)。
-
-第五篇解析 v12 与后续演进，核心在于探讨实时检测的速度约束下注意力机制的应用边界。v12 采用按区域切分的局部注意力机制，使模型在支持任意长宽比输入的同时，将计算复杂度控制在可实时运行的范围内；通过残差聚合网络中的缩放残差连接缓解注意力模块带来的收敛困难；并通过调小 MLP 比例、去除显式位置编码、结合大核可分离卷积来平衡精度与延迟。v26 进一步精简了结构：移除 DFL 表征以降低解码开销，并将 NMS 设为可选配置，重点优化 CPU 推理速度与边缘设备部署体验。本篇最后还会对照 RT-DETR，阐明演进至今的 YOLO 与基于 Transformer 的检测器在底层原理上已高度趋同，现阶段的差异主要体现在实时延迟控制、模型分级粒度以及边缘部署生态上。参见 [YOLO 演进（5）：注意力引入与部署简化](./attention-deployment)。
+- J. Redmon, S. Divvala, R. Girshick, and A. Farhadi, *You Only Look Once: Unified, Real-Time Object Detection*（2015）— [arXiv:1506.02640](https://arxiv.org/abs/1506.02640)
+- J. Redmon and A. Farhadi, *YOLO9000: Better, Faster, Stronger*（2016）— [arXiv:1612.08242](https://arxiv.org/abs/1612.08242)
+- J. Redmon and A. Farhadi, *YOLOv3: An Incremental Improvement*（2018）— [arXiv:1804.02767](https://arxiv.org/abs/1804.02767)
+- A. Bochkovskiy, C.-Y. Wang, and H.-Y. M. Liao, *YOLOv4: Optimal Speed and Accuracy of Object Detection*（2020）— [arXiv:2004.10934](https://arxiv.org/abs/2004.10934)
+- Z. Ge, S. Liu, F. Wang, Z. Li, and J. Sun, *YOLOX: Exceeding YOLO Series in 2021*（2021）— [arXiv:2107.08430](https://arxiv.org/abs/2107.08430)
+- C.-Y. Wang, A. Bochkovskiy, and H.-Y. M. Liao, *YOLOv7: Trainable Bag-of-Freebies Sets New State-of-the-Art for Real-Time Object Detectors*（2022）— [arXiv:2207.02696](https://arxiv.org/abs/2207.02696)
+- C.-Y. Wang, I.-H. Yeh, and H.-Y. M. Liao, *YOLOv9: Learning What You Want to Learn Using Programmable Gradient Information*（2024）— [arXiv:2402.13616](https://arxiv.org/abs/2402.13616)
+- A. Wang, H. Chen, L. Liu, K. Chen, Z. Lin, J. Han, and G. Ding, *YOLOv10: Real-Time End-to-End Object Detection*（2024）— [arXiv:2405.14458](https://arxiv.org/abs/2405.14458)
+- Y. Tian, Q. Ye, and M. Shen, *YOLOv12: Attention-Centric Real-Time Object Detectors*（2025）— [arXiv:2502.12524](https://arxiv.org/abs/2502.12524)
