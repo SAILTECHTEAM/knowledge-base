@@ -1,5 +1,5 @@
 ---
-sidebar_position: 9
+sidebar_position: 3
 title: "Evaluation Metrics"
 description: "The measurement logic of evaluation protocols: hit rules, PR curves, the AP family, size and speed slices, error-split attribution, and metric-to-component mapping."
 ---
@@ -10,7 +10,7 @@ After grasping model architectures, many readers of detection literature still g
 
 The confusion comes from mixing architects' design logic with protocols' measurement logic. Evaluation is a measurement chain fully independent of any concrete detector structure. It starts from single-box geometric overlap rules, builds precision–recall curves through confidence ranking, then projects complex spatial detection into scalars with explicit physical meaning through multi-threshold averaging and area splits.
 
-This standalone appendix to the Deconstructing Object Detection series clarifies the measurement system and maps metric values back onto each preceding article's core components. For the series guide, see [Part 0: Architecture and Core Components](./architecture-overview).
+This standalone appendix to the Deconstructing Object Detection series clarifies the measurement system and maps metric values back onto each preceding article's core components. For the series guide, see [Part 0: Architecture and Core Components](./deconstruction/architecture-overview).
 
 ## 1. What detection tasks need measured
 
@@ -18,10 +18,10 @@ Image classification only judges whole-image semantic labels, with predictions m
 
 A competent detector evaluation therefore cannot emit one blanket score. It must measure five dimensions at once, each mapping directly onto system-component technical choices:
 
-1. **Localization accuracy**: how tightly predicted boxes hug true object geometric borders. This dimension directly tests detection heads' box parameterization and regression-loss design; see [Part 4: Box Representation and Regression Loss](./bbox-regression-loss).
-2. **Classification correctness**: the purity of semantic recognition inside candidate regions and the calibration quality of classification confidence. This dimension maps to classification losses and confidence design in [Part 5: Classification Confidence and Detection Heads](./classification-head).
-3. **Duplicate suppression**: whether the model emits multiple redundant boxes for one true object. This performance answers directly to training-time sample matching plus inference-time non-maximum suppression (NMS); see [Part 3: Label Assignment](./label-assignment).
-4. **Multi-scale and dense-layout completeness**: whether the model detects everything without omission when huge and tiny objects coexist or small objects pack densely. This dimension mainly tests multi-scale pyramid semantic scheduling; see [Part 6: Multi-Scale Features and Neck Architectures](./neck-architecture).
+1. **Localization accuracy**: how tightly predicted boxes hug true object geometric borders. This dimension directly tests detection heads' box parameterization and regression-loss design; see [Part 4: Box Representation and Regression Loss](./deconstruction/bbox-regression-loss).
+2. **Classification correctness**: the purity of semantic recognition inside candidate regions and the calibration quality of classification confidence. This dimension maps to classification losses and confidence design in [Part 5: Classification Confidence and Detection Heads](./deconstruction/classification-head).
+3. **Duplicate suppression**: whether the model emits multiple redundant boxes for one true object. This performance answers directly to training-time sample matching plus inference-time non-maximum suppression (NMS); see [Part 3: Label Assignment](./deconstruction/label-assignment).
+4. **Multi-scale and dense-layout completeness**: whether the model detects everything without omission when huge and tiny objects coexist or small objects pack densely. This dimension mainly tests multi-scale pyramid semantic scheduling; see [Part 6: Multi-Scale Features and Neck Architectures](./deconstruction/neck-architecture).
 5. **Deployment and compute cost**: end-to-end latency, parameter count, and computational complexity on target hardware. This decides real-time deployability and answers directly to backbone networks, neck topologies, and whether NMS post-processing is included.
 
 Since no single number reflects all five dimensions, detection protocols evolved a layered dissection mechanism.
@@ -42,7 +42,7 @@ During evaluation the system presets a threshold $\theta_{\text{IoU}}$ (e.g. 0.5
 
 ### 2.2 The essential evaluation-versus-training matching difference
 
-Beginners easily conflate evaluation-stage IoU matching with training-stage [Part 3: Label Assignment](./label-assignment). Both compute geometric overlap with IoU, but their stages, purposes, and permitted operations differ completely:
+Beginners easily conflate evaluation-stage IoU matching with training-stage [Part 3: Label Assignment](./deconstruction/label-assignment). Both compute geometric overlap with IoU, but their stages, purposes, and permitted operations differ completely:
 
 - **Training matching (label assignment)**: runs before network backpropagation, inside single images. Its purpose is assigning supervision signals (positive or negative) to every prediction carrier (grids, anchors, feature points, or queries), telling the network which object to approach. In dense prediction networks (e.g. FCOS or Faster R-CNN RPN), training matching usually adopts a **one-to-many** protocol — one true object may supervise dozens of spatially overlapping prediction units simultaneously.
 - **Evaluation matching**: runs after inference emits all predictions, across the whole test set. Its purpose is auditing final detection quality. Evaluation protocols strictly enforce **one-to-one, confidence-ranked greedy matching**: for any true object, only the single highest-confidence image-wide box satisfying $\text{IoU} \ge \theta_{\text{IoU}}$ matches as TP; every other overlapping box, however high its predicted probability, is judged a false positive (FP).
@@ -192,22 +192,22 @@ flowchart TD
 ### 4.1 Localization error ($E_{\text{loc}}$)
 
 - **Physical symptom**: the box recognizes the object's semantic class and overlaps truth at $\text{IoU} \ge 0.10$, but misses the evaluation's main threshold (e.g. $\text{IoU} < 0.50$).
-- **Attribution**: classification branches fired successfully, but regression branches drifted geometrically. Check [Part 4: Box Representation and Regression Loss](./bbox-regression-loss) first for coordinate-loss forms (whether Smooth L1 lacks border gradient sensitivity, whether Distribution Focal Loss is needed) and feature-sampling receptive-field versus geometric misalignment (coarse RoIPool quantization to RoIAlign).
+- **Attribution**: classification branches fired successfully, but regression branches drifted geometrically. Check [Part 4: Box Representation and Regression Loss](./deconstruction/bbox-regression-loss) first for coordinate-loss forms (whether Smooth L1 lacks border gradient sensitivity, whether Distribution Focal Loss is needed) and feature-sampling receptive-field versus geometric misalignment (coarse RoIPool quantization to RoIAlign).
 
 ### 4.2 Classification-confusion error ($E_{\text{cls}}$)
 
 - **Physical symptom**: the box overlaps truth well geometrically ($\text{IoU} \ge 0.50$) but carries the wrong class label.
-- **Attribution**: geometry works, high-level semantic discrimination distorts. Check [Part 5: Classification Confidence and Detection Heads](./classification-head) first for classification-loss design (class imbalance collapsing rare classes into common ones) and missing head decoupling (classification and regression features forcibly sharing one kernel causing task conflict).
+- **Attribution**: geometry works, high-level semantic discrimination distorts. Check [Part 5: Classification Confidence and Detection Heads](./deconstruction/classification-head) first for classification-loss design (class imbalance collapsing rare classes into common ones) and missing head decoupling (classification and regression features forcibly sharing one kernel causing task conflict).
 
 ### 4.3 Duplicate-detection error ($E_{\text{dup}}$)
 
 - **Physical symptom**: one true object is hit by multiple high-scoring boxes simultaneously; only the top scorer counts as TP, the rest as duplicate FPs.
-- **Attribution**: the system fails to suppress redundant responses. Check [Part 3: Label Assignment](./label-assignment) and inference post-processing first: for one-to-many systems, whether NMS IoU suppression thresholds run too loose or Soft-NMS decay parameters need work; to eliminate the error class at the root, consider Hungarian bipartite-matching end-to-end one-to-one architectures (DETR or YOLOv10).
+- **Attribution**: the system fails to suppress redundant responses. Check [Part 3: Label Assignment](./deconstruction/label-assignment) and inference post-processing first: for one-to-many systems, whether NMS IoU suppression thresholds run too loose or Soft-NMS decay parameters need work; to eliminate the error class at the root, consider Hungarian bipartite-matching end-to-end one-to-one architectures (DETR or YOLOv10).
 
 ### 4.4 Background false-alarm and miss errors
 
 - **Background false alarms ($E_{\text{bkg}}$)**: boxes land on pure background ($\text{IoU} < 0.10$ with every truth). Points to classification-branch confidence-calibration failure, or training-time hard-negative-mining / Focal Loss suppressing easy backgrounds too weakly.
-- **Object misses ($E_{\text{miss}}$)**: image truths covered by no confidence-passing box. Points to carrier spatial-coverage density gaps and small-object features dying out in deep networks — strengthen multi-scale fusion from [Part 1: Prediction Carriers](./prediction-carrier) and [Part 6: Multi-Scale Features and Neck Architectures](./neck-architecture).
+- **Object misses ($E_{\text{miss}}$)**: image truths covered by no confidence-passing box. Points to carrier spatial-coverage density gaps and small-object features dying out in deep networks — strengthen multi-scale fusion from [Part 1: Prediction Carriers](./deconstruction/prediction-carrier) and [Part 6: Multi-Scale Features and Neck Architectures](./deconstruction/neck-architecture).
 
 ## 5. Core metric comparison
 
