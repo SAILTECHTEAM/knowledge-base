@@ -1,0 +1,69 @@
+---
+sidebar_position: 1
+title: "YOLO Series Overview"
+description: "A chronological overview and architectural roadmap of the YOLO object detection family from YOLOv1 to YOLO-v26."
+---
+
+# YOLO Series Overview
+
+The YOLO series has evolved continuously from YOLOv1 in 2015 to YOLO-v26 in 2026, spanning more than a decade of development. Over this period, leadership of the project changed hands multiple times. Joseph Redmon and his collaborators created v1 through v3. Chien-Yao Wang and Hong-Yuan Mark Liao led the development of v4, v7, and v9. Ultralytics developed and maintained v5, v8, v11, and v26. Other research groups introduced key variants along the way, including Megvii's YOLOX, Meituan's v6, and Tsinghua University's v10. Although all these models share the YOLO name, their architectural choices differ significantly, and their releases range from formal academic papers to technical reports and open-source releases.
+
+Because the lineage is split across multiple independent teams, no single version should be studied in isolation. Each model reflects the specific computational and architectural bottlenecks of its era, while inheriting design constraints from previous iterations. Tracing this progression chronologically reveals why specific components — such as anchor boxes, residual paths, and reparameterized layers — were introduced, and why later versions revised or removed them.
+
+This series breaks down the complete architectural evolution across five distinct phases, tracing the line from early single-stage prototypes to modern attention-driven and NMS-free real-time detectors.
+
+:::tip[Foundation]
+Review the [CNN Fundamentals](/files/cv/CNN_Note_v2.pdf) note for core concepts on convolutional operations, receptive fields, pooling, and normalization before exploring the architecture evolutions below.
+:::
+
+## Series Map
+
+### [Part 1: Single-Stage Origins (v1–v3)](./v1-v3-single-stage-origins)
+
+Validates the viability of single-stage object detection and establishes the baseline framework. YOLOv1 replaced regional proposals with direct spatial grid regression via fully connected layers, achieving high frame rates at the cost of localization precision and small-object recall. YOLOv2 introduced batch normalization, high-resolution fine-tuning, anchor priors, and multi-scale training to stabilize deeper networks. YOLOv3 established the standard architecture — Darknet-53 residual backbone, multi-scale feature pyramids (FPN), and independent detection heads — alongside one-to-many positive sample assignment and Non-Maximum Suppression (NMS).
+
+### [Part 2: Integration and Engineering Ecosystem (v4–v5)](./v4-v5-integration)
+
+Explores the practical upper bound of integrating proven vision techniques. This phase standardized Mosaic data augmentation, Cross Stage Partial (CSP) network connections, Path Aggregation Network (PAN) necks, and Complete IoU (CIoU) bounding box loss. The design principle focused on shifting computational overhead to the training stage to maximize representation quality without increasing inference latency. Academic efforts pushed detection accuracy boundaries, while Ultralytics hardened deployment workflows, export tooling, and modular training pipelines.
+
+### [Part 3: Hardware-Aware Design and Training Refinements (v6–v7)](./v6-v7-hardware-training)
+
+Shifts focus from theoretical FLOP counts toward hardware execution efficiency and training dynamics. YOLOv6 adopted structural reparameterization, using multi-branch modules during training that fuse into plain $3 \times 3$ convolutions for inference, with direct optimization for TensorRT and INT8 quantization. YOLOv7 introduced Extended Efficient Layer Aggregation Networks (E-ELAN), systematic reparameterization placement, compound scaling rules for depth and width, and dual-head deep supervision with soft label assignment between lead and auxiliary heads.
+
+### [Part 4: Anchor Removal and Optional NMS (YOLOX, v8–v11)](./anchor-free-nms-optional)
+
+Transitions the architecture away from predefined anchor boxes and addresses the latency overhead of NMS post-processing. YOLOX introduced decoupled classification-regression heads and dynamic matching with SimOTA. YOLOv8 popularized Task-Aligned Assigner (TAL) and Distribution Focal Loss (DFL) for flexible bounding box regression. YOLOv9 added Programmable Gradient Information (PGI) to preserve semantic signals across deep layers. YOLOv10 integrated dual label assignment — using one-to-many assignment for rich training supervision and one-to-one assignment for inference — eliminating NMS entirely. YOLOv11 unified multi-task heads for detection, instance segmentation, pose estimation, and oriented bounding boxes.
+
+### [Part 5: Attention Mechanisms and Edge Deployment (v12, YOLO-v26)](./attention-deployment)
+
+Integrates attention mechanisms into real-time detectors and optimizes deployment for resource-constrained hardware. YOLOv12 introduced area attention to model long-range dependencies within bounded computational limits, using scaled residual connections, reduced MLP ratios, and separable convolutions to match CNN latency profiles. YOLO-v26 further streamlined the pipeline by removing DFL to cut decoding overhead, making NMS fully optional, and optimizing CPU and edge hardware execution. This phase demonstrates how modern YOLO architectures converge conceptually with Transformer-based detectors like RT-DETR while retaining edge efficiency.
+
+## Evolution Timeline
+
+| Version | Year | Key Innovation | Study Note |
+| :--- | :--- | :--- | :--- |
+| YOLOv1 | 2016 | First single-stage detector; grid-based coordinate regression | [📄 Note](/files/cv/YOLOv1_Note_v1.pdf) |
+| YOLOv2 | 2017 | Batch normalization, anchor boxes, multi-scale training | [📄 Note](/files/cv/YOLOv2_Note_v1.pdf) |
+| YOLOv3 | 2018 | Darknet-53 residual backbone, multi-scale FPN predictions | [📄 Note](/files/cv/YOLOv3_Note_v1.pdf) |
+| YOLOv4 | 2020 | CSPDarknet53, PANet neck, Mosaic augmentation, CIoU loss | [📄 Note](/files/cv/YOLOv4_Notes_v1.pdf) |
+| YOLOv5 | 2020 | Modular PyTorch framework, auto-anchor, hyperparameter evolution | [📄 Note](/files/cv/YOLOv5_Note_v1.pdf) |
+| YOLOv6 | 2022 | Hardware-friendly design, RepVGG reparameterization, decoupled head | [📄 Note](/files/cv/YOLOv6_Note_v1.pdf) |
+| YOLOv7 | 2022 | E-ELAN architecture, compound model scaling, dual-head supervision | [📄 Note](/files/cv/YOLOv7_Note_v1.pdf) |
+| YOLOv8 | 2023 | Anchor-free decoupled head, Task-Aligned Assigner, DFL regression | [📄 Note](/files/cv/YOLOv8_Note_v1.pdf) |
+| YOLOv9 | 2024 | Programmable Gradient Information (PGI), GELAN architecture | [📄 Note](/files/cv/YOLOv9_Note_v1.pdf) |
+| YOLOv10 | 2024 | Dual label assignment for consistent NMS-free real-time inference | — |
+| YOLOv11 | 2024 | Unified multi-task architecture (detection, segmentation, pose, OBB) | — |
+| YOLOv12 | 2025 | Area attention, residual aggregation network for real-time attention | — |
+| YOLO-v26 | 2026 | Edge-first optimization, DFL removal for low-latency decoding, optional NMS | — |
+
+## Reference Papers
+
+- J. Redmon, S. Divvala, R. Girshick, and A. Farhadi, *You Only Look Once: Unified, Real-Time Object Detection* (2015) — [arXiv:1506.02640](https://arxiv.org/abs/1506.02640)
+- J. Redmon and A. Farhadi, *YOLO9000: Better, Faster, Stronger* (2016) — [arXiv:1612.08242](https://arxiv.org/abs/1612.08242)
+- J. Redmon and A. Farhadi, *YOLOv3: An Incremental Improvement* (2018) — [arXiv:1804.02767](https://arxiv.org/abs/1804.02767)
+- A. Bochkovskiy, C.-Y. Wang, and H.-Y. M. Liao, *YOLOv4: Optimal Speed and Accuracy of Object Detection* (2020) — [arXiv:2004.10934](https://arxiv.org/abs/2004.10934)
+- Z. Ge, S. Liu, F. Wang, Z. Li, and J. Sun, *YOLOX: Exceeding YOLO Series in 2021* (2021) — [arXiv:2107.08430](https://arxiv.org/abs/2107.08430)
+- C.-Y. Wang, A. Bochkovskiy, and H.-Y. M. Liao, *YOLOv7: Trainable Bag-of-Freebies Sets New State-of-the-Art for Real-Time Object Detectors* (2022) — [arXiv:2207.02696](https://arxiv.org/abs/2207.02696)
+- C.-Y. Wang, I.-H. Yeh, and H.-Y. M. Liao, *YOLOv9: Learning What You Want to Learn Using Programmable Gradient Information* (2024) — [arXiv:2402.13616](https://arxiv.org/abs/2402.13616)
+- A. Wang, H. Chen, L. Liu, K. Chen, Z. Lin, J. Han, and G. Ding, *YOLOv10: Real-Time End-to-End Object Detection* (2024) — [arXiv:2405.14458](https://arxiv.org/abs/2405.14458)
+- Y. Tian, Q. Ye, and M. Shen, *YOLOv12: Attention-Centric Real-Time Object Detectors* (2025) — [arXiv:2502.12524](https://arxiv.org/abs/2502.12524)
