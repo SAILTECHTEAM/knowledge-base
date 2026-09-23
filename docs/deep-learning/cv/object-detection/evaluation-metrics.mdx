@@ -10,7 +10,7 @@ After grasping model architectures, many readers of detection literature still g
 
 The confusion comes from mixing architects' design logic with protocols' measurement logic. Evaluation is a measurement chain fully independent of any concrete detector structure. It starts from single-box geometric overlap rules, builds precision–recall curves through confidence ranking, then projects complex spatial detection into scalars with explicit physical meaning through multi-threshold averaging and area splits.
 
-This standalone appendix to the Deconstructing Object Detection series clarifies the measurement system and maps metric values back onto each preceding article's core components. For the series guide, see [architecture and core components](./deconstruction/architecture-overview).
+This article clarifies the measurement system and maps metric values back onto the core components of detection architectures, as dissected in [Deconstructing Object Detection](./deconstruction/architecture-overview).
 
 ## What detection tasks need measured
 
@@ -242,4 +242,4 @@ When reading and evaluating detection models, never isolate single-mAP rankings 
 - AP50 measures **whether semantic classification found objects**; AP75 measures **whether geometric borders fit flush** — complementary pairs.
 - Size metrics ($AP_S, AP_M, AP_L$) map directly onto multi-scale fusion scheduling efficiency, while error splits (Loc, Cls, Dup) directly locate targeted improvements for the five core components.
 
-With the measurement chain's logic mastered, ablation tables in papers reveal each model part's true behavior in geometric regression, feature fusion, and sample assignment. This closes the technical loop over the full Deconstructing Object Detection series.
+With the measurement chain's logic mastered, ablation tables in papers reveal each model part's true behavior in geometric regression, feature fusion, and sample assignment, closing the technical loop between measurement logic and component design.
