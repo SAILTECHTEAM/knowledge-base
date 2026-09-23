@@ -16,23 +16,23 @@ YOLO 系列從 2015 年的 v1 持續演進到 2026 年的 v26，時間跨度超�
 
 ## 系列內容規劃
 
-### [YOLO 演進（1）：單階段檢測的起步](./v1-v3-single-stage-origins)
+### [第一篇：單階段檢測的起步](./v1-v3-single-stage-origins)
 
 第一篇聚焦 v1 到 v3，核心在於驗證單階段檢測範式的可行性並確立基礎框架。v1 採用空間網格與全連接層直接回歸整圖目標，推理速度極快，但在小目標檢測和定位精度上表現粗糙。v2 引入批歸一化、高分辨率微調、Anchor 機制與多尺度訓練，解決了深層單階段網絡的訓練與優化難題。到了 v3，Darknet-53 殘差骨幹網與三尺度特徵預測基本確立了“Backbone + 多尺度 Neck + Detection Head”的經典範式，同時沿用了 Anchor 機制、一對多正負樣本匹配與 NMS 後處理。
 
-### [YOLO 演進（2）：方法集成及工程生態](./v4-v5-integration)
+### [第二篇：方法集成及工程生態](./v4-v5-integration)
 
 第二篇梳理 v4 到 v5，核心在於探索成熟技巧的工程集成上限。這一階段集中湧現了 Mosaic 數據增強、CSP（Cross Stage Partial，跨階段部分連接）、PAN（Path Aggregation Network，路徑聚合網絡）與 CIoU 損失等技術。這些方案的共同邏輯在於：在訓練階段增加計算以提升表徵能力，儘量不增加或極少增加推理開銷。學術團隊更側重精度極限的挖掘，而 Ultralytics 則更注重代碼生態的易用性與工程部署效率。
 
-### [YOLO 演進（3）：硬件友好與訓練細化](./v6-v7-hardware-training)
+### [第三篇：硬件友好與訓練細化](./v6-v7-hardware-training)
 
 第三篇討論 v6 到 v7，核心在於打破只關注理論精度的侷限，將網絡結構、硬件執行效率與訓練策略深度協同。v6 遵循硬件友好原則重構網絡：訓練期採用多分支結構增強表徵，推理前重參數化為單路 $3 \times 3$ 卷積，並在設計階段就將量化與推理引擎的算子支持納入考量。v7 則在訓練策略上進一步細化，系統探討了重參數化模塊的放置位置、深度監督下 Lead Head 與 Aux Head 的軟標籤分配機制，以及模型縮放時的寬度與深度協同配比。到 v7 階段，密集預測與 NMS 帶來的端到端延遲和超參數負擔日益顯著，演進焦點逐步轉向樣本匹配與 Head 結構。
 
-### [YOLO 演進（4）：anchor 去除與 NMS 可選化](./anchor-free-nms-optional)
+### [第四篇：anchor 去除與 NMS 可選化](./anchor-free-nms-optional)
 
-第四篇分析 YOLOX 以及 v8 到 v11，核心在於擺脱 Anchor 先驗並嘗試將 NMS 從推理必需項轉變為可選項。YOLOX 較早轉向 Anchor-free 路線，解耦分類與迴歸分支，並引入 SimOTA 進行動態樣本匹配。v8 將該路線進一步鋪開，採用任務對齊分配（Task-Aligned Assigner）與 DFL（Distribution Focal Loss）邊界框分佈表徵。v9 提出可編程梯度信息（PGI），以緩解深層特徵的信息瓶頸。v10 引入雙標籤分配機制：訓練時保留一對多分支以確保召回率，推理時直接使用一對一分支，從而省去 NMS 計算。v11 則重點擴展了多任務統一支持，底層檢測機制未作大幅改動。本篇內容與樣本匹配、Head 設計緊密相關，可對照 [目標檢測解構（3）：Label Assignment](../deconstruction/label-assignment) 與 [目標檢測解構（5）：分類置信度與 Detection Head](../deconstruction/classification-head) 閲讀。
+第四篇分析 YOLOX 以及 v8 到 v11，核心在於擺脱 Anchor 先驗並嘗試將 NMS 從推理必需項轉變為可選項。YOLOX 較早轉向 Anchor-free 路線，解耦分類與迴歸分支，並引入 SimOTA 進行動態樣本匹配。v8 將該路線進一步鋪開，採用任務對齊分配（Task-Aligned Assigner）與 DFL（Distribution Focal Loss）邊界框分佈表徵。v9 提出可編程梯度信息（PGI），以緩解深層特徵的信息瓶頸。v10 引入雙標籤分配機制：訓練時保留一對多分支以確保召回率，推理時直接使用一對一分支，從而省去 NMS 計算。v11 則重點擴展了多任務統一支持，底層檢測機制未作大幅改動。本篇內容與樣本匹配、Head 設計緊密相關，可對照 [Label Assignment](../deconstruction/label-assignment) 與 [分類置信度與 Detection Head](../deconstruction/classification-head) 閲讀。
 
-### [YOLO 演進（5）：注意力引入與部署簡化](./attention-deployment)
+### [第五篇：注意力引入與部署簡化](./attention-deployment)
 
 第五篇解析 v12 與後續演進，核心在於探討實時檢測的速度約束下注意力機制的應用邊界。v12 採用按區域切分的局部注意力機制，使模型在支持任意長寬比輸入的同時，將計算複雜度控制在可實時運行的範圍內；通過殘差聚合網絡中的縮放殘差連接緩解注意力模塊帶來的收斂困難；並通過調小 MLP 比例、去除顯式位置編碼、結合大核可分離卷積來平衡精度與延遲。v26 進一步精簡了結構：移除 DFL 表徵以降低解碼開銷，並將 NMS 設為可選配置，重點優化 CPU 推理速度與邊緣設備部署體驗。本篇最後還會對照 RT-DETR，闡明演進至今的 YOLO 與基於 Transformer 的檢測器在底層原理上已高度趨同，現階段的差異主要體現在實時延遲控制、模型分級粒度以及邊緣部署生態上。
 

@@ -11,7 +11,7 @@ v12 / v26 暂无配套 PDF 笔记。背景可参考 [YOLOv8](/files/cv/YOLOv8_No
 :::
 
 
-在 [YOLO 演进（4）：anchor 去除与 NMS 可选化](./anchor-free-nms-optional) 中，单阶段目标检测器完成了现代范式的终极定型：通过解耦检测头、无锚框点式预测（Anchor-free）、动态任务对齐（TAL）、连续边界分布（DFL）以及一致性双重分配（NMS-free），卷积检测器在特征表征与端到端无冗余推理上达到了前所未有的高度。
+在 [第四篇](./anchor-free-nms-optional) 中，单阶段目标检测器完成了现代范式的终极定型：通过解耦检测头、无锚框点式预测（Anchor-free）、动态任务对齐（TAL）、连续边界分布（DFL）以及一致性双重分配（NMS-free），卷积检测器在特征表征与端到端无冗余推理上达到了前所未有的高度。
 
 然而，在 2024 年至 2026 年的技术演进收官阶段，单阶段实时检测器在应用落地上面临着两条截然相反、却又相互呼应的终局诉求：
 1. **表征能力的上限突破（追求极致精度）**：纯卷积神经网络（CNN）依赖局部滑动窗口，其有效感受野随深度呈亚线性扩展，在全局长程上下文建模、复杂大尺度背景判别以及微弱小目标关联上逐渐显露出理论天花板。学术界渴望将具备全局注意力的 Vision Transformer 引入实时检测器，但自注意力机制的二次方计算复杂度与碎片化访存构成了巨大的延迟鸿沟；
@@ -183,12 +183,12 @@ YOLO 留给计算机视觉领域的最宝贵遗产，可以凝聚为三项不可
 
 ### 全系列导航
 
-- 上一篇：[YOLO 演进（4）：anchor 去除与 NMS 可选化](./anchor-free-nms-optional)
-- 系列总览：[YOLO 演进（0）](./)
+- 上一篇：[第四篇：anchor 去除与 NMS 可选化](./anchor-free-nms-optional)
+- 系列总览：[YOLO 演进总览](./)
 - 部件解构专栏：
-  - [目标检测解构（1）：预测载体](../deconstruction/prediction-carrier)
-  - [目标检测解构（2）：特征采样](../deconstruction/feature-sampling)
-  - [目标检测解构（3）：Label Assignment](../deconstruction/label-assignment)
-  - [目标检测解构（4）：边界框表示与回归损失](../deconstruction/bbox-regression-loss)
-  - [目标检测解构（5）：分类置信度与 Detection Head](../deconstruction/classification-head)
-  - [目标检测解构（6）：多尺度特征与 Neck 架构](../deconstruction/neck-architecture)
+  - [预测载体](../deconstruction/prediction-carrier)
+  - [特征采样](../deconstruction/feature-sampling)
+  - [Label Assignment](../deconstruction/label-assignment)
+  - [边界框表示与回归损失](../deconstruction/bbox-regression-loss)
+  - [分类置信度与 Detection Head](../deconstruction/classification-head)
+  - [多尺度特征与 Neck 架构](../deconstruction/neck-architecture)
