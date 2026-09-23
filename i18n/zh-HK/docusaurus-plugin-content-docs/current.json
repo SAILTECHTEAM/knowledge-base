@@ -143,8 +143,8 @@
     "message": "目標檢測解構",
     "description": "The label for category 'Deconstructing Object Detection' in sidebar 'tutorialSidebar'"
   },
-  "sidebar.tutorialSidebar.category.YOLO Series": {
-    "message": "YOLO 系列",
-    "description": "The label for category 'YOLO Series' in sidebar 'tutorialSidebar'"
+  "sidebar.tutorialSidebar.category.Analyzing the YOLO Series": {
+    "message": "YOLO 系列解析",
+    "description": "The label for category 'Analyzing the YOLO Series' in sidebar 'tutorialSidebar'"
   }
 }
