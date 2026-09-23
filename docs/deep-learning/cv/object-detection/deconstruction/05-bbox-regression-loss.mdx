@@ -1,10 +1,10 @@
 ---
 sidebar_position: 6
-title: "Deconstructing Object Detection (4) Box Representation and Regression Loss"
+title: "Box Representation and Regression Loss"
 description: "Localization supervision from independent coordinate losses to IoU geometry losses to DFL distribution modeling: training objectives converging step by step onto evaluation metrics."
 ---
 
-# Deconstructing Object Detection (4): Box Representation and Regression Loss
+# Box Representation and Regression Loss
 
 Evaluation metrics inspect predicted-versus-true region overlap, while early training losses computed only per-edge value gaps. When predicted and true boxes are fully disjoint, coordinate gaps persist while IoU is already zero. For small objects, a $2$-pixel single-edge shift takes an eighth of its width; for large objects, the same $2$-pixel shift barely touches the overlap ratio.
 

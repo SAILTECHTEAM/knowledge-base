@@ -1,10 +1,10 @@
 ---
 sidebar_position: 5
-title: 目標檢測解構（3）Label Assignment
+title: Label Assignment
 description: 樣本匹配從靜態幾何規則到動態代價指派的演進：中心採樣、ATSS、SimOTA/TAL、一對一匹配與雙分配機制。
 ---
 
-# 目標檢測解構（3）：Label Assignment
+# Label Assignment
 
 在檢測網絡計算任何分類損失與定位損失之前，必須先回答一個前提：整張圖像產生的數千乃至數萬個[預測載體](./prediction-carrier)（無論是特徵圖上的網格點、預設的錨框，還是全局的查詢向量）中，到底哪幾個有資格獲得真值標籤的指導，剩下的又該由誰作爲負樣本去學習壓制背景？
 
