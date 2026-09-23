@@ -1,10 +1,10 @@
 ---
 sidebar_position: 8
-title: "Deconstructing Object Detection (6) Multi-Scale Features and Neck Architectures"
+title: "Multi-Scale Features and Neck Architectures"
 description: "Neck information-flow evolution: SSD independent prediction, FPN top-down, PANet bidirectional, BiFPN weighted fusion, and the RT-DETR hybrid encoder."
 ---
 
-# Deconstructing Object Detection (6): Multi-Scale Features and Neck Architectures
+# Multi-Scale Features and Neck Architectures
 
 Backbones typically downsample three times, with feature strides (feature-map downsampling factor relative to input) of $8$, $16$, $32$ in sequence. A $16$-pixel small object spans $2\times 2$ points on the stride-8 $80\times 80$ map, $1\times 1$ on stride-16, and $0.5\times 0.5$ on stride-32 $20\times 20$. Past high-ratio downsampling, its features inevitably blend inseparably with surrounding background.
 

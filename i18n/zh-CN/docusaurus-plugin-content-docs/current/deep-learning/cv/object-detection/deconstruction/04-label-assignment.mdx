@@ -1,10 +1,10 @@
 ---
 sidebar_position: 5
-title: 目标检测解构（3）Label Assignment
+title: Label Assignment
 description: 样本匹配从静态几何规则到动态代价指派的演进：中心采样、ATSS、SimOTA/TAL、一对一匹配与双分配机制。
 ---
 
-# 目标检测解构（3）：Label Assignment
+# Label Assignment
 
 在检测网络计算任何分类损失与定位损失之前，必须先回答一个前提：整张图像产生的数千乃至数万个[预测载体](./prediction-carrier)（无论是特征图上的网格点、预设的锚框，还是全局的查询向量）中，到底哪几个有资格获得真值标签的指导，剩下的又该由谁作为负样本去学习压制背景？
 

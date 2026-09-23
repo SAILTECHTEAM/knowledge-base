@@ -1,10 +1,10 @@
 ---
 sidebar_position: 4
-title: "Deconstructing Object Detection (2) Feature Sampling"
+title: "Feature Sampling"
 description: "From dense grid convolution, deformable convolution, and RoIPool/RoIAlign to deformable attention and dynamic convolution: how feature sampling closes the gap between discrete grids and the continuous world."
 ---
 
-# Deconstructing Object Detection (2): Feature Sampling
+# Feature Sampling
 
 Detection narratives often place Faster R-CNN and DETR in different eras: the former as the classic two-stage region-proposal network cropping local features with candidate regions (RoIs), the latter as the Transformer-based end-to-end detector emitting boxes from learned object queries. Yet at the geometric-sampling level, both belong to the same camp — each first selects candidate positions in continuous space, then actively samples features at the corresponding feature-map coordinates.
 
