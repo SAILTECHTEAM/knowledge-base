@@ -51,6 +51,14 @@ const config: Config = {
   themes: ['@docusaurus/theme-mermaid'],
 
   plugins: [
+    function photoswipePlugin() {
+      return {
+        name: 'photoswipe-plugin',
+        getClientModules() {
+          return [path.resolve(__dirname, './plugins/photoswipe/client')];
+        },
+      };
+    },
     [
       'docusaurus-numbered-headings',
       {

@@ -58,3 +58,9 @@
 .wide-table table {
   min-width: 1200px;
 }
+
+/* Doc images open in a PhotoSwipe lightbox on click; images inside
+   links keep the pointer cursor since they navigate instead. */
+.markdown img:not(a img) {
+  cursor: zoom-in;
+}
