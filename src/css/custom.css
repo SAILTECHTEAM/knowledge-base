@@ -65,6 +65,11 @@
   cursor: zoom-in;
 }
 
+/* Mermaid diagrams open in the same PhotoSwipe lightbox on click. */
+.docusaurus-mermaid-container svg {
+  cursor: zoom-in;
+}
+
 /* Footer: single copyright line styled to match the navbar — same
    background (theme-adaptive) and same height (--ifm-navbar-height). */
 .footer {
