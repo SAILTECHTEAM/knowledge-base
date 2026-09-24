@@ -5,6 +5,53 @@ import type * as Preset from '@docusaurus/preset-classic';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 
+/** One-line `$$foo$$` is display math; `$foo$` stays inline. */
+function remarkDoubleDollarAsDisplay() {
+  return (tree: {children?: unknown[]}, file: {value?: unknown}) => {
+    const src = String(file.value ?? '');
+    const lines = src.split('\n');
+
+    const fromDoubleDollar = (node: {
+      value?: string;
+      position?: {start?: {offset?: number; line?: number}};
+    }) => {
+      const off = node.position?.start?.offset;
+      if (off != null && (src.startsWith('$$', off) || (off >= 2 && src.startsWith('$$', off - 2)))) {
+        return true;
+      }
+      const lineNo = node.position?.start?.line;
+      if (lineNo == null || node.value == null) {
+        return false;
+      }
+      const line = lines[lineNo - 1] ?? '';
+      return line.includes('$$' + node.value + '$$');
+    };
+
+    const visit = (node: {
+      type?: string;
+      data?: {hProperties?: {className?: unknown}};
+      children?: unknown[];
+      value?: string;
+      position?: {start?: {offset?: number; line?: number}};
+    }) => {
+      if (node.type === 'inlineMath' && fromDoubleDollar(node)) {
+        const cls = node.data?.hProperties?.className;
+        if (Array.isArray(cls)) {
+          node.data!.hProperties!.className = cls.map((c) =>
+            c === 'math-inline' ? 'math-display' : c,
+          );
+        }
+      }
+      if (Array.isArray(node.children)) {
+        for (const child of node.children) {
+          visit(child as typeof node);
+        }
+      }
+    };
+    visit(tree);
+  };
+}
+
 // GitHub "Dark Dimmed" syntax colors; background matches the dark raised
 // surface (--ifm-background-surface-color) so code blocks sit one layer up
 // from the page canvas.
@@ -137,7 +184,7 @@ const config: Config = {
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           editUrl: 'https://github.com/SAILTECHTEAM/knowledge-base/tree/main/',
-          remarkPlugins: [remarkMath],
+          remarkPlugins: [remarkMath, remarkDoubleDollarAsDisplay],
           rehypePlugins: [rehypeKatex],
           showLastUpdateTime: false,
         },
