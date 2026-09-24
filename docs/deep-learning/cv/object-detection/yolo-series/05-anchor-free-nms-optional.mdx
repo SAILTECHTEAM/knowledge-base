@@ -90,6 +90,8 @@ Standard OTA requires the iterative Sinkhorn-Knopp algorithm, increasing trainin
 
 For the full assignment mechanics, see [label assignment](../deconstruction/label-assignment).
 
+In design terms, YOLOX's central goal was shedding the historical baggage of anchor priors and coupled heads. The authors accepted the extra inference latency (roughly 1.1 ms) from dense $3 \times 3$ convolutions in the standard decoupled head in exchange for faster convergence under anchor-free prediction and stronger cross-dataset generalization — establishing the baseline for subsequent lightweight head refinements.
+
 ---
 
 ## YOLOv8: Decoupled Representations, Continuous Distributions, and Task Alignment
@@ -113,7 +115,7 @@ $$t = s^\alpha \cdot u^\beta$$
 
 where $s \in [0, 1]$ is the predicted class score, $u \in [0, 1]$ is the IoU between predicted and ground-truth boxes, and hyperparameters are set to $\alpha = 1.0, \beta = 6.0$.
 
-The high exponent $\beta = 6.0$ penalizes poor localization: even if $s = 1.0$, a drop in IoU to $u = 0.7$ reduces the alignment metric to $t = 1.0 \times 0.7^6 \approx 0.117$. Only predictions that excel in both classification and localization receive high alignment scores.
+The high exponent $\beta = 6.0$ penalizes poor localization: even if $s = 1.0$, a drop in IoU to $u = 0.7$ reduces the alignment metric to $t = 1.0 \times 0.7^6 \approx 0.117$. Only predictions that excel in both classification and localization receive high alignment scores. The cost of this strict setting: for occluded or blurred hard samples, even perfectly accurate classification receives a sharply suppressed supervision weight if box localization deviates slightly, risking reduced recall on difficult objects. The authors accepted this constraint to eliminate, at the source, the suppression of well-localized boxes by high-scoring but poorly localized predictions in traditional NMS.
 
 #### Dynamic Soft-Label Supervision
 
@@ -149,7 +151,7 @@ YOLOv8 integrates **Distribution Focal Loss (DFL)**, modeling coordinate offset 
 
    $$L_{\text{DFL}} = -\left( (y_{i+1} - y) \ln(P_i) + (y - y_i) \ln(P_{i+1}) \right)$$
 
-   Clear object boundaries produce sharp, unimodal distributions resembling Dirac deltas; ambiguous or occluded edges yield broader distributions reflecting localization uncertainty.
+   Clear object boundaries produce sharp, unimodal distributions resembling Dirac deltas; ambiguous or occluded edges yield broader distributions reflecting localization uncertainty. The cost of this design was expanding bounding-box outputs to $4 \times 16 = 64$ channels per grid cell and introducing Softmax plus integral-expectation operators at inference. The authors abandoned the minimalist alternative of regressing 4 scalars directly in exchange for localization accuracy on ambiguous and occluded boundaries.
 
 For loss derivations and boundary parameterizations, see [box regression](../deconstruction/bbox-regression-loss).
 
@@ -166,6 +168,8 @@ For input tensor $X \in \mathbb{R}^{H \times W \times C_{\text{in}}}$:
    $$Y = \text{Conv}_{1 \times 1}\left( [x_1, x_2, \text{Bottleneck}_1(x_2), \text{Bottleneck}_2(\dots), \dots] \right)$$
 
 Drawing from DenseNet and ELAN gradient concepts, C2f shortens backpropagation paths between shallow and deep features, improving gradient propagation and multi-scale feature reuse. For CSP variants, see [neck architectures](../deconstruction/neck-architecture).
+
+YOLOv8's principal architectural trade-offs were concentrated in the detection head: DFL distribution modeling traded $4 \times 16 = 64$-channel expansion and inference-side Softmax integration operators for fine-grained modeling of occluded and ambiguous edges, while TAL delegated sample matching to joint classification–localization scoring, trading stricter geometric penalties for cleaner gradients on high-quality samples. The C3-to-C2f backbone upgrade, by contrast, was a pure structural optimization improving feature reuse at comparable compute.
 
 ---
 
@@ -198,6 +202,8 @@ YOLOv9 resolves this by **decoupling inference feature compression from training
 3. **Multi-level auxiliary information**: standard deep supervision routes ground-truth signals only to corresponding scale layers, causing shallow layers to treat larger objects as background. Multi-level auxiliary networks aggregate multi-scale target features before backpropagating to shallow layers, ensuring early layers retain holistic object representations.
 
 At inference time, the auxiliary reversible branch and multi-level integration paths are discarded. Combined with the **Generalized Efficient Layer Aggregation Network (GELAN)**, YOLOv9 matches or exceeds prior accuracy while reducing parameter counts.
+
+Architecturally, YOLOv9 extended the front-load-training-cost design philosophy. The authors accepted the extra memory footprint and backpropagation compute of maintaining auxiliary reversible branches and multi-level auxiliary connections during training in exchange for a compact inference backbone with zero added overhead — avoiding the heavy forward latency of a fully reversible backbone.
 
 ---
 
@@ -248,6 +254,8 @@ $$\arg\max_i m_{\text{o2o}} \equiv \arg\max_i m_{\text{o2m}}$$
 This ensures that the positive sample chosen by the one-to-one head is identically the highest-ranked prediction in the one-to-many head. The two heads optimize without gradient conflict.
 
 During deployment, **the one-to-many auxiliary head is discarded, and only the one-to-one main head is retained**, achieving real-time **NMS-free inference**.
+
+In architectural terms, YOLOv10's core trade-off spent dual-head training compute and memory for deterministic zero-NMS latency at inference. Because training directly with one-to-one matching would starve convolutional networks of positive-sample gradients and severely degrade small-object performance, the authors absorbed that optimization difficulty entirely into training through a provably consistent dual-assignment mechanism.
 
 ### Efficiency Design via Numerical Rank Analysis
 

@@ -120,6 +120,8 @@ To resolve this issue, YOLOv6 adopted **RepOpt (reparameterizing optimizer)**:
 
 Because the network maintains a plain single-path structure throughout its training lifecycle, it avoids multi-branch weight distribution clashes. RepOpt retains the optimization benefits of multi-branch training while maintaining full compatibility with standard PTQ and quantization-aware training (QAT) workflows, enabling low-latency INT8 industrial deployment.
 
+Architecturally, YOLOv6's central objective was maximizing realized throughput on target hardware. The authors abandoned the multi-branch residual topologies and attention mechanisms common in academic work, accepting the limited parameter efficiency of plain single-path structures at large model scales in exchange for the high arithmetic intensity of Winograd-accelerated $3 \times 3$ convolutions and INT8 quantized inference on GPUs.
+
 ---
 
 ## YOLOv7: Model Capacity Scaling and Training Dynamics
@@ -209,6 +211,8 @@ YOLOv7 established an asymmetric compound scaling rule:
 - **Scale transition layer width by $1.25\times$** to bound channel dimensions across stage concatenations.
 
 Under identical computational budgets, asymmetric scaling achieved higher mAP on COCO benchmarks than uniform proportional scaling.
+
+At the systems level, YOLOv7's core strategy was front-loading all computational and engineering costs into training. The authors accepted the considerable training complexity of auxiliary-head assignment, re-parameterized structural design, and gradient-path planning in exchange for high-effective-rank backbone representations at inference — raising the accuracy ceiling of convolutional detectors with zero added inference latency.
 
 ---
 
