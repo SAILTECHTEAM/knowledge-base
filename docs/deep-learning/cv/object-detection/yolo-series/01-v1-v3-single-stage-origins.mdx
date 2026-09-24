@@ -1,0 +1,263 @@
+---
+sidebar_position: 2
+title: "Single-Stage Origins (v1–v3)"
+description: "How YOLO established single-stage real-time detection, from v1 direct regression to v2 anchor constraints and v3 multi-scale pyramids."
+---
+
+# Single-Stage Origins (v1–v3)
+
+:::tip[Study notes]
+Companion notes: [YOLOv1](/files/cv/YOLOv1_Note_v1.pdf) · [YOLOv2](/files/cv/YOLOv2_Note_v1.pdf) · [YOLOv3](/files/cv/YOLOv3_Note_v1.pdf)
+:::
+
+In 2015, the dominant paradigm in object detection was the two-stage framework established by the R-CNN family. These detectors generated candidate region proposals using heuristic algorithms like Selective Search (or later, the Region Proposal Network in Faster R-CNN), cropped and extracted features for each candidate region independently, and then computed classification probabilities and bounding box coordinates. While two-stage detectors achieved solid accuracy on Pascal VOC, the duplicated feature computation across overlapping candidate regions pushed inference latency into seconds per frame, ruling out real-time industrial deployment. In theory, mapping an input image directly to all detection outputs in a single forward pass would eliminate candidate cropping redundancies entirely. However, whether single-stage regression could match two-stage accuracy remained unproven.
+
+YOLOv1 reframed object detection as an end-to-end spatial regression problem. With a single forward pass, the network predicted bounding box coordinates and class probabilities simultaneously, achieving real-time inference speeds on standard GPUs. Yet the initial architecture suffered from noticeable structural deficiencies: poor small-object recall, lower localization accuracy compared to two-stage models, and an inability to resolve dense or overlapping objects. Bringing single-stage detection to production-grade quality required iterative architectural refinement: YOLOv2 restructured coordinate parameterization and training stability, while YOLOv3 introduced feature pyramids for multi-scale prediction. This three-generation evolution established the standard three-part object detector blueprint — Backbone, Neck, and Head — that shaped the field for the following decade.
+
+This article reviews the evolution from YOLOv1 through YOLOv3. Rather than cataloging layer counts across Darknet variants, the focus is on the causal engineering decisions behind each design choice: how v1 resolved the mismatch between variable object counts and fixed output tensors; how v2 fixed optimization instabilities and localization errors through batch normalization, constrained anchor residuals, and passthrough layers; and how v3 consolidated modern detection design through residual connections, multi-scale feature concatenation, and independent multi-label classification. Understanding these three generations across prediction carriers, feature sampling, and loss formulations provides the baseline needed to analyze subsequent developments from YOLOv4 to YOLO-v26.
+
+## v1: Full-Image Direct Regression
+
+### The Single-Stage Feasibility Problem and Fixed-Length Output Constraints: Spatial Grids
+
+In a two-stage pipeline, the number of candidate regions varies per image, and the network processes each candidate independently to accommodate variable object counts. Compressing this process into a single forward pass creates a structural challenge: the number of objects in an image is unknown beforehand, yet a feedforward neural network requires a fixed-dimensional output tensor.
+
+YOLOv1 resolved this through **spatial grid partitioning**. The model divides the input image into an $S \times S$ regular grid (defaulting to $7 \times 7$). If an object's ground-truth center falls inside a grid cell, that specific cell is assigned to predict that object. This spatial prior transforms an unbounded whole-image search into fixed-length predictions across $S \times S = 49$ localized spatial units. For a formal analysis of spatial grids as prediction carriers, see [prediction carriers](../deconstruction/prediction-carrier).
+
+### Grid Cell Predictions: Bounding Boxes, Confidence Scores, and Class Probabilities
+
+To express detection outputs within a fixed tensor, each grid cell predicts a fixed-dimensional vector. On Pascal VOC (20 classes), each cell predicts 30 scalar values, yielding an output tensor of shape $7 \times 7 \times 30$:
+
+1. **Bounding box predictions ($B=2$ candidate boxes)**: each box consists of 5 parameters $(x, y, w, h, C)$. Here $(x, y)$ is the center offset relative to the bounds of the current grid cell, normalized to $[0, 1]$; $(w, h)$ is the width and height relative to the entire image dimensions; and $C$ denotes the confidence score, defined as:
+
+	$$C = \Pr(\text{Object}) \times \text{IoU}_{\text{pred}}^{\text{truth}}$$
+
+	This score reflects both the prior probability that an object exists within the cell and the spatial overlap quality between the predicted box and the ground truth.
+2. **Conditional class probabilities ($C=20$ classes)**: each cell predicts a conditional distribution $\Pr(\text{Class}_i \mid \text{Object})$, representing class probabilities given that an object is present. This single distribution is shared across all $B$ candidate boxes in that cell.
+
+During inference, multiplying conditional class probabilities by individual box confidence scores yields class-specific confidence scores for each box:
+
+$$\Pr(\text{Class}_i) \times \text{IoU}_{\text{pred}}^{\text{truth}} = \Pr(\text{Class}_i \mid \text{Object}) \times \left( \Pr(\text{Object}) \times \text{IoU}_{\text{pred}}^{\text{truth}} \right)$$
+
+For the decoupling of objectness confidence and classification scores, see [classification heads](../deconstruction/classification-head); for normalized bounding box parameterization, see [box regression](../deconstruction/bbox-regression-loss). The complete mapping from input image to output tensor is illustrated below:
+
+![YOLOv1 prediction pipeline: from 7x7 grid to 7x7x30 tensor](https://ar5iv.org/html/1506.02640/assets/model.png)
+
+> Source: YOLOv1, Fig. 2 The Model, https://ar5iv.org/html/1506.02640
+
+### From Full Image to 7×7×30 Tensor: Network Architecture
+
+To produce the $7 \times 7 \times 30$ output tensor, YOLOv1 uses a sequential network containing 24 convolutional layers followed by 2 fully connected layers. The convolutional backbone draws from GoogLeNet and Network in Network, alternating $1 \times 1$ channel-reduction convolutions with $3 \times 3$ spatial convolutions to manage computational cost, though without GoogLeNet's multi-branch Inception blocks.
+
+The defining architectural choice is the **dense fully connected readout** at the head. The convolutional backbone outputs a $7 \times 7 \times 1024$ feature map, which is flattened into a 50,176-dimensional vector, fed through a 4,096-dimensional fully connected hidden layer, and projected into a $7 \times 7 \times 30 = 1,470$ dimensional output vector before being reshaped into the final tensor.
+
+Using fully connected layers as the detection head provides an immediate structural property: every output node connects to every spatial position in the feature map, granting the network a global receptive field to leverage whole-image context and suppress background false positives. However, this dense sampling imposes major trade-offs: flattening breaks spatial translation equivariance, forcing the network to memorize spatial response patterns independently across coordinates; it introduces well over a hundred million parameters in the dense layers; and it locks the network to a fixed $448 \times 448$ input resolution. For a comparative analysis of feature sampling schemes, see [feature sampling](../deconstruction/feature-sampling).
+
+![YOLOv1 network architecture: 24 convolutional layers followed by 2 fully connected layers](https://ar5iv.org/html/1506.02640/assets/net.svg)
+
+> Source: YOLOv1, Fig. 3 The Architecture, https://ar5iv.org/html/1506.02640
+
+### Detection as Regression: Loss Formulation and Engineering Trade-offs
+
+Under this regression framework, YOLOv1 treats coordinates, dimensions, confidence scores, and class probabilities as continuous values, optimizing the entire model using a unified **weighted sum-squared error (SSE)** loss:
+
+$$
+\begin{aligned}
+L &= \lambda_{\text{coord}} \sum_{i=0}^{S^2} \sum_{j=0}^{B} \mathbb{I}_{ij}^{\text{obj}} \left[ (x_i - \hat{x}_i)^2 + (y_i - \hat{y}_i)^2 \right] \\
+&\quad + \lambda_{\text{coord}} \sum_{i=0}^{S^2} \sum_{j=0}^{B} \mathbb{I}_{ij}^{\text{obj}} \left[ (\sqrt{w_i} - \sqrt{\hat{w}_i})^2 + (\sqrt{h_i} - \sqrt{\hat{h}_i})^2 \right] \\
+&\quad + \sum_{i=0}^{S^2} \sum_{j=0}^{B} \mathbb{I}_{ij}^{\text{obj}} (C_i - \hat{C}_i)^2 + \lambda_{\text{noobj}} \sum_{i=0}^{S^2} \sum_{j=0}^{B} \mathbb{I}_{ij}^{\text{noobj}} (C_i - \hat{C}_i)^2 \\
+&\quad + \sum_{i=0}^{S^2} \mathbb{I}_{i}^{\text{obj}} \sum_{c \in \text{classes}} (p_i(c) - \hat{p}_i(c))^2
+\end{aligned}
+$$
+
+The loss terms reflect deliberate engineering trade-offs:
+
+1. **Balancing positive and negative gradients**: in a $7 \times 7$ grid, most cells contain no objects (background cells). Left unweighted, confidence gradients from background cells ($C_i = 0$) would overpower gradients from cells containing objects, destabilizing training. The authors introduced asymmetric weighting hyperparameters: $\lambda_{\text{coord}} = 5$ amplifies coordinate regression, while $\lambda_{\text{noobj}} = 0.5$ suppresses background confidence loss.
+2. **Compressing dimensional scales**: SSE penalizes absolute pixel deviations equally across large and small boxes. A 2-pixel shift barely alters IoU for a large object, but causes severe misalignment or total misses for a small one. To reduce large-box gradient dominance, the loss operates on square roots of width and height ($\sqrt{w}, \sqrt{h}$), exploiting the concave nature of square-root functions to compress error magnitudes at larger scales.
+3. **Competitive matching protocol (label assignment)**: while an object cell outputs $B=2$ candidate boxes, only one box is assigned to fit the target during training — specifically, the candidate whose current prediction achieves higher IoU with ground truth ($\mathbb{I}_{ij}^{\text{obj}} = 1$). This winner-take-all assignment encourages the two box predictors to specialize in different aspect ratios and scales over time. For the progression of assignment protocols, see [label assignment](../deconstruction/label-assignment).
+
+### Inference Pipeline and Non-Maximum Suppression (NMS)
+
+During inference, YOLOv1 outputs a $7 \times 7 \times 30$ tensor in a single forward pass, containing $S \times S \times B = 7 \times 7 \times 2 = 98$ candidate boxes across the image. For box $j$ in grid cell $i$, the model multiplies objectness confidence by the conditional class probability to compute the **class-specific confidence score**:
+
+$$\text{Score}_{ij}(c) = P(\text{Class}_c \mid \text{Object}) \cdot \left( P(\text{Object}) \cdot \text{IoU}_{\text{pred}}^{\text{truth}} \right) = p_i(c) \cdot C_i^j$$
+
+This score captures both the probability of that class appearing inside the box and how closely the box fits the physical target.
+
+Because large targets span multiple adjacent cells and multiple boxes within a cell can respond strongly to the same target, the network produces redundant overlapping boxes for individual physical objects. YOLOv1 applies **Non-Maximum Suppression (NMS)** as a post-processing filter:
+
+1. **Confidence thresholding**: zero out boxes whose class score falls below a threshold (default 0.2).
+2. **Greedy deduplication**: for each class independently, sort surviving boxes by confidence, select the highest-scoring box $M$, and iterate through remaining candidates $b_k$. If $\text{IoU}(M, b_k) > 0.5$, discard $b_k$ as redundant.
+3. **Recursive processing**: repeat for the remaining boxes until all candidates are processed.
+
+On Pascal VOC 2007, NMS added 2–3 mAP points to YOLOv1. This highlights an enduring property of single-stage architectures: **despite pursuing an end-to-end forward mapping, dense spatial predictions create physical redundancy, coupling the detector to greedy NMS post-processing from the start**. This post-processing dependency persisted across multiple detector generations.
+
+### Achievements: Real-Time Inference and Low Background False Positives
+
+YOLOv1 demonstrated the viability of single-stage regression. Without region proposal overhead, the base model achieved 45 FPS on an Nvidia Titan X, while Fast YOLO reached 155 FPS, enabling real-time video processing.
+
+Furthermore, because its fully connected head predicted coordinates using full-image semantic context, YOLOv1 made fewer background false positive errors than Fast R-CNN. Global context prevented the detector from mistaking background textures or patches for foreground objects.
+
+### Structural Limitations and Root Causes
+
+On the VOC 2007 test set, YOLOv1 achieved 63.4% mAP, falling behind Faster R-CNN (73.2%). Error analysis in the original paper identified localization error as the primary bottleneck. As shown below, localization errors accounted for 19.0% of YOLO's total error distribution compared to 8.6% for Fast R-CNN, while YOLO's background false positive rate was only 4.75% compared to 13.6% for Fast R-CNN:
+
+![Error breakdown comparison between Fast R-CNN and YOLO: YOLO localization error (19.0%) exceeds Fast R-CNN (8.6%), while background false positives (4.75%) remain lower than Fast R-CNN (13.6%)](https://ar5iv.org/html/1506.02640/assets/pie_compare.png)
+
+> Source: YOLOv1, Fig. 4 Error Analysis, https://ar5iv.org/html/1506.02640
+
+These limitations stemmed directly from v1's core design choices:
+
+1. **Small-object information loss from single-scale features**: a cumulative $64\times$ downsampling factor left only a $7 \times 7$ high-level feature map. At this resolution, small objects collapse to single pixels or vanish entirely. High-resolution spatial details from shallow layers never reached the head, causing frequent small-object misses.
+2. **Rigid spatial capacity per grid cell**: each cell predicted a single shared class distribution and was assigned at most one ground-truth object. When two objects shared centers within the same $64 \times 64$ pixel cell (such as crowded flocks of birds or pedestrians), the architecture could only predict one, guaranteeing a miss.
+3. **Unconstrained coordinate regression without geometric priors**: the model regressed raw box offsets and dimensions directly from unconstrained initialization. Normalizing centers relative to cell boundaries while normalizing dimensions relative to the whole image forced the network to search an unconstrained parameter space without initial size baselines, complicating optimization.
+4. **Loss of translation equivariance and fixed input dimensions**: flattening feature maps through dense layers destroyed translation equivariance, requiring the model to memorize object patterns independently at every coordinate. It also locked input dimensions permanently.
+5. **NMS dependency from one-to-many assignment**: strong activations across adjacent grid cells for a single object necessitated heuristic NMS filtering during inference.
+
+## v2: Systematic Fixes to v1 Flaws
+
+YOLOv2 (introduced as YOLO9000) addressed the structural weaknesses in YOLOv1. Its improvements focused on three main areas: stabilizing training optimization, parameterizing bounding box priors, and fusing fine-grained shallow features.
+
+### Training Stability: Introducing Batch Normalization and Removing Dropout
+
+In YOLOv1, the dense layers contained a very large number of parameters. On compact datasets like Pascal VOC, this induced heavy overfitting, requiring Dropout layers with a rate of 0.5 to suppress co-adaptation.
+
+YOLOv2 removed all fully connected layers, shrinking parameter counts to several million and easing overfitting risks. In convolutional feature maps, dropout damages local spatial correlations between neighboring pixels while offering minimal regularization value. YOLOv2 integrated **batch normalization (BN)** across all convolutional layers and eliminated Dropout entirely, improving mAP by over 2 percentage points.
+
+Batch normalization computes the channel-wise mean $\mu_B$ and variance $\sigma_B^2$ across all spatial locations in a mini-batch, standardizing activations before applying learnable scale $\gamma$ and shift $\beta$ parameters:
+
+$$\hat{x} = \frac{x - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}},\quad y = \gamma \hat{x} + \beta$$
+
+Batch normalization supported the YOLOv2 architecture in three ways:
+
+1. **Smoother optimization landscapes**: deep unnormalized convolutional stacks are prone to vanishing gradients or exploding activation variances. BN maintains activations near zero mean and unit variance, smoothing the loss landscape, enabling higher initial learning rates, and reducing sensitivity to weight initialization.
+2. **Implicit regularization**: because mini-batch statistics fluctuate with random batch sampling, training activations receive slight stochastic noise. This noise provides regularization similar to dropout, preventing overfitting after dropout removal.
+3. **Statistic adaptation for high-resolution fine-tuning**: in v1, switching directly from $224 \times 224$ classification pre-training to $448 \times 448$ detection training caused activation distribution shifts that degraded accuracy. YOLOv2 fine-tuned the classification backbone at $448 \times 448$ for 10 epochs before detection training, letting convolutional filters and BN running statistics stabilize at higher resolutions. This step alone contributed nearly 4% mAP.
+
+### Direct Coordinate Regression Difficulties: Anchor Residual Offsets
+
+To resolve the optimization instability of unconstrained coordinate regression, YOLOv2 adopted **anchor boxes**, reformulating absolute coordinate prediction into residual offset estimation against geometric priors.
+
+Faster R-CNN's RPN allowed unconstrained box offsets in log space, which caused predicted boxes to drift anywhere across the image during early training, destabilizing gradients. YOLOv2 introduced a **constrained residual parameterization** that applies a sigmoid function to bind predicted box centers strictly within the physical boundaries of the corresponding cell:
+
+$$
+\begin{aligned}
+b_x &= \sigma(t_x) + c_x \\
+b_y &= \sigma(t_y) + c_y \\
+b_w &= p_w e^{t_w} \\
+b_h &= p_h e^{t_h}
+\end{aligned}
+$$
+
+Here $(c_x, c_y)$ denotes the discrete integer top-left corner coordinates of the grid cell on the feature map; $(p_w, p_h)$ denotes the width and height of the anchor prior scaled to feature-map units; and $(t_x, t_y, t_w, t_h)$ are the unconstrained scalars output by the network.
+
+Restricting center offsets to $(0, 1)$ via $\sigma(t_x)$ and $\sigma(t_y)$ guarantees that box centers $(b_x, b_y)$ never leave their assigned grid cell. This spatial anchoring stabilizes optimization from initialization. The geometric relationship is illustrated below: dashed outlines indicate anchor priors, solid outlines indicate predicted boxes, dimensions scale from cluster centroids via exponential factors $e^t$, and centers are constrained within grid bounds by sigmoid activations.
+
+![Geometric relationship between anchor priors and residual offsets: width and height scale from cluster centroids via exponential factors while centers are bounded inside cells via sigmoid activation](https://ar5iv.org/html/1612.08242/assets/bbox.svg)
+
+> Source: YOLOv2, Fig. 3 Bounding boxes with dimension priors and location prediction, https://ar5iv.org/html/1612.08242
+
+### Dimension Priors via k-means and 1−IoU Distance
+
+Earlier models like Faster R-CNN relied on hand-picked anchor dimensions (fixed combinations of scales and aspect ratios). YOLOv2 replaced manual selection with $k$-means clustering on bounding boxes across the training set, deriving anchor templates that fit the data distribution.
+
+Using standard Euclidean distance $d(x, c) = \|x - c\|_2^2$ biases clustering toward large bounding boxes because large absolute dimensions generate larger Euclidean errors. To weigh all bounding boxes equally regardless of absolute scale, the authors defined a scale-invariant distance metric:
+
+$$d(\text{box}, \text{centroid}) = 1 - \text{IoU}(\text{box}, \text{centroid})$$
+
+On VOC 2007, setting $k=5$ yielded an average IoU of 61.0% between cluster priors and ground-truth boxes, outperforming 9 hand-selected anchor boxes. The figure below shows average IoU versus $k$ on the left alongside cluster centroids for VOC and COCO on the right. Both datasets show a preference for tall, narrow boxes, with COCO displaying wider variance. For formal analysis on anchor optimization, see [prediction carriers](../deconstruction/prediction-carrier).
+
+![Anchor box dimensions from k-means clustering: average IoU vs. number of clusters k alongside VOC and COCO cluster centroids](https://ar5iv.org/html/1612.08242/assets/clusters2.svg)
+
+> Source: YOLOv2, Fig. 2 Clustering box dimensions on VOC and COCO, https://ar5iv.org/html/1612.08242
+
+### 416×416 Input Resolution and Center-Aligned Feature Maps
+
+YOLOv2 adjusted the default input resolution from v1's $448 \times 448$ to $416 \times 416$. With an overall $32\times$ downsampling factor across the backbone, the resulting output feature map measures $13 \times 13$.
+
+Using an odd spatial dimension ($13 \times 13$) rather than an even one ($14 \times 14$) is intentional: prominent objects in natural images frequently occupy the center of the frame. An odd-dimension feature map contains a single central cell $(6, 6)$ responsible for predicting center-aligned objects. An even-dimension grid places the center at the intersection of four adjacent cells, causing competition and redundant responses.
+
+### Small-Object Misses: Passthrough Layer for Fine-Grained Feature Fusion
+
+To mitigate small-object information loss in deep feature maps, YOLOv2 introduced a **passthrough cross-layer connection**.
+
+In the Darknet-19 backbone, the penultimate stage outputs a $26 \times 26 \times 512$ higher-resolution feature map, while the final stage produces a $13 \times 13 \times 1024$ deeper semantic feature map. The passthrough layer applies a lossless space-to-depth reorganization: each $2 \times 2$ spatial window in the $26 \times 26 \times 512$ map is unrolled along the channel dimension, converting it into a $13 \times 13 \times 2048$ tensor. This is concatenated directly along channels with the deep $13 \times 13 \times 1024$ features, yielding a $13 \times 13 \times 3072$ composite representation for the detection head.
+
+Unlike bilinear interpolation or deconvolution, space-to-depth reorganization preserves all high-frequency spatial coordinate details from shallow features without interpolation blur. This allows the head to access abstract high-level semantics alongside precise fine-grained geometric cues, improving small-object recall. This mechanism served as an early precursor to modern feature pyramid connections, detailed in [neck architectures](../deconstruction/neck-architecture).
+
+### Multi-Scale Training via Fully Convolutional Design
+
+Removing dense layers made YOLOv2 a fully convolutional network (FCN), removing architectural dependencies on fixed input resolutions.
+
+YOLOv2 leveraged this to introduce **multi-scale training**: every 10 batches, the network randomly samples a new input resolution from $\{320, 352, 384, \dots, 608\}$ (stepping by 32 pixels) and resizes subsequent inputs accordingly.
+
+This forces convolutional filters to extract features across diverse receptive-field scales, allowing a single trained model to trade speed for accuracy dynamically at runtime. On resource-constrained edge hardware, deploying at $288 \times 288$ yields over 90 FPS; in server environments prioritizing accuracy, running at $544 \times 544$ provides higher precision without retraining.
+
+### Solved Issues and Remaining Bottlenecks
+
+By combining batch normalization, clustered anchor priors, bounded coordinate regression, passthrough feature fusion, and multi-scale training, YOLOv2 improved recall and training stability. It reached 78.6% mAP on VOC 2007 at real-time speeds, matching Faster R-CNN.
+
+Yet several structural limitations remained:
+
+1. **Single-scale prediction output**: despite fusing shallow features through the passthrough layer, the detection head still predicted bounding boxes solely at a single $13 \times 13$ resolution, struggling when extreme scale variations co-occurred in a single scene.
+2. **Backbone depth limits**: Darknet-19 lacked residual connections. Stacking more convolutional layers led to gradient degradation, capping feature capacity.
+3. **Mutually exclusive classification assumptions**: the softmax classification branch assumed one mutually exclusive class per bounding box, creating conflicts on complex datasets with overlapping or hierarchical categories.
+
+## v3: Multi-Scale Prediction and Independent Classification
+
+YOLOv3 solidified the foundational design of modern single-stage object detectors while maintaining real-time throughput. Its primary updates centered on three areas: a deeper Darknet-53 backbone built with residual blocks, a three-scale feature pyramid detection head, and replacing mutually exclusive softmax classification with independent logistic classifiers.
+
+### Deep Network Optimization: Darknet-53 Residual Architecture
+
+To increase feature extraction capacity, YOLOv3 introduced **Darknet-53**, a 53-layer convolutional backbone. Compared to Darknet-19, its key addition was the systematic use of residual skip connections:
+
+$$y = x + \mathcal{F}(x, \{W_i\})$$
+
+During backpropagation, identity shortcut paths pass unattenuated gradient signals directly to early layers ($\frac{\partial y}{\partial x} = I + \frac{\partial \mathcal{F}}{\partial x}$), mitigating gradient vanishing in deep networks. Combined with batch normalization, this allows the 53-layer stack to converge stably.
+
+Darknet-53 also eliminated max pooling entirely, performing all spatial downsampling with stride-2 $3 \times 3$ convolutions. Strided convolutions make downsampling learnable, reducing spatial information loss. In classification benchmarks, Darknet-53 achieved Top-1 accuracy comparable to ResNet-101 while processing images at higher throughput.
+
+### Scale Discrepancies: Three-Scale Prediction and Feature Pyramids
+
+To handle large scale variations, YOLOv3 adapted concepts from Feature Pyramid Networks (FPN), replacing the single prediction head with a **three-scale parallel feature pyramid**. The diagram below compares four multi-scale feature schemes: featurizing an image pyramid requires repeated forward passes; single-scale features offer fast inference but cover only one scale; reusing backbone layers directly (featurized pyramid) lacks deep semantic information in early stages; and FPN combines top-down semantic paths with lateral connections to preserve both semantic strength and spatial detail efficiently.
+
+![Comparison of four multi-scale feature schemes: image pyramid, single-scale feature map, featurized image pyramid, and feature pyramid network (FPN)](https://ar5iv.org/html/1612.03144/assets/teaser.png)
+
+> Source: FPN, Fig. 1 Feature Pyramid Network, https://ar5iv.org/html/1612.03144
+
+1. **Large-object branch ($13 \times 13$, stride 32)**: located at the deepest network layer, carrying the largest receptive field and richest semantic abstraction, responsible for detecting large objects.
+2. **Medium-object branch ($26 \times 26$, stride 16)**: channels from the $13 \times 13$ stage are adjusted via a $1 \times 1$ convolution, upsampled $2\times$ using nearest-neighbor interpolation, and concatenated along channels with matching $26 \times 26$ shallow backbone features to detect medium-sized objects.
+3. **Small-object branch ($52 \times 52$, stride 8)**: features from the $26 \times 26$ stage are upsampled another $2\times$ and concatenated with early $52 \times 52$ high-resolution features to detect fine-grained small objects.
+
+Each prediction scale is assigned 3 anchor box priors derived via $k$-means clustering, totaling 9 anchor templates across the network. YOLOv3 relies on **channel concatenation rather than element-wise addition** for feature fusion. Concatenation maintains distinct feature channels for deep semantics and shallow spatial cues, letting downstream convolutional layers learn adaptive weighting between the two paths. For deeper structural analysis of feature pyramids, see [neck architectures](../deconstruction/neck-architecture).
+
+### Mutually Exclusive Class Assumption: Per-Class Binary Logistic Regression
+
+In YOLOv1 and v2, classification branches used the softmax activation function:
+
+$$p_i = \frac{e^{s_i}}{\sum_{j} e^{s_j}}$$
+
+Softmax assumes that **each candidate box belongs to exactly one class, with all classes being strictly mutually exclusive**. While valid on non-overlapping datasets like Pascal VOC, this assumption breaks down on complex datasets like COCO or Open Images, where annotations include overlapping or hierarchical labels (for example, an object labeled as both person and woman). Softmax forces probabilities to sum to 1, causing artificial competition across related labels and conflicting gradient updates during training.
+
+YOLOv3 replaced the softmax head with **independent binary logistic regression classifiers**, evaluating each class independently with a sigmoid activation and binary cross-entropy (BCE) loss:
+
+$$p_i = \sigma(s_i) = \frac{1}{1 + e^{-s_i}},\quad L_{\text{cls}} = -\sum_{i} \left[ y_i \log p_i + (1 - y_i) \log (1 - p_i) \right]$$
+
+This formulation provides two key advantages:
+
+1. **Multi-label classification support**: class predictions are decoupled, allowing an object to output high confidence across multiple related classes simultaneously, enabling hierarchical learning and cross-dataset co-training.
+2. **Decoupled classification and objectness**: objectness confidence evaluates whether an entity exists in a bounding box, while independent classifiers identify its semantic attributes. This eliminated the coupled conditional probabilities in v1 and laid the foundation for modern decoupled detection heads, detailed in [classification heads](../deconstruction/classification-head).
+
+### Three Lingering Structural Bottlenecks
+
+By YOLOv3, the standard architecture of modern single-stage detectors — **deep residual backbone + top-down multi-scale feature pyramid + dense multi-scale anchor head** — was established. However, this dense grid-and-anchor paradigm retained three structural bottlenecks:
+
+1. **Hyperparameter sensitivity of anchor priors**: anchor dimensions and aspect ratios remained rigid hyperparameters. Detectors struggled to generalize to objects with extreme aspect ratios (such as power lines or tall towers). Adapting to new datasets or domain shifts required re-clustering and manual tuning. This issue was ultimately addressed when models like YOLOX and YOLOv8 transitioned to **anchor-free** designs.
+2. **Severe class imbalance from dense candidate grids**: at a $416 \times 416$ input resolution, the three-scale pyramid outputs $13^2 \times 3 + 26^2 \times 3 + 52^2 \times 3 = 10{,}647$ candidate boxes per image. With typical images containing only a handful of actual objects, over 99.9% of candidate boxes act as negative background samples. Because v3 relied on static IoU thresholds for hard assignment, tiny ground-truth objects frequently failed to achieve the 0.5 IoU threshold against any anchor, causing extreme positive sample sparsity. This challenge motivated dynamic assignment strategies such as SimOTA and Task-Aligned Assigner, discussed in [label assignment](../deconstruction/label-assignment).
+3. **Inference NMS dependency from one-to-many assignment**: assigning multiple overlapping anchor boxes as positive samples for a single ground-truth object during training caused redundant responses for the same physical object during inference. The detector remained dependent on non-maximum suppression (NMS) post-processing. The computational overhead and hardware divergence of NMS remained the final barrier to true end-to-end real-time deployment, a challenge eventually resolved in YOLOv10 via dual label assignment.
+
+The progression from YOLOv1 to YOLOv3 demonstrated the engineering viability of single-stage object detection: v1 proved the speed advantages of full-image regression, v2 stabilized optimization through anchor residuals and batch normalization, and v3 established multi-scale robustness through feature pyramids.
+
+---
+
+Next: [Part 2: Method Integration (v4–v5)](./v4-v5-integration)

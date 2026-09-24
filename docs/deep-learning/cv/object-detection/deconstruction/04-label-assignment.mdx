@@ -1,0 +1,205 @@
+---
+sidebar_position: 5
+title: "Label Assignment"
+description: "Sample matching from static geometric rules to dynamic cost-based assignment: center sampling, ATSS, SimOTA/TAL, one-to-one matching, and dual assignment."
+---
+
+# Label Assignment
+
+Before any classification or localization loss is computed, one premise must be settled: among the thousands to tens of thousands of [prediction carriers](./prediction-carrier) an image produces — grid points, preset anchors, or global query vectors — which ones earn ground-truth supervision, and which remaining ones learn to suppress background as negatives?
+
+That is label assignment (sample matching). Its trajectory is no mere hyperparameter tuning. It is an evolution **from static handcrafted geometric rules, to dynamic evaluation incorporating the model's current predictive power, and finally to trading deduplication cost between training losses and inference compute**.
+
+## The geometric-rule era: center hits to anchor overlap
+
+In early deep-learning detection, positive/negative splits were fully decided by geometry before forward propagation even began. Static rules passed through two phases:
+
+### Naive center-hit assignment (YOLOv1) and its limits
+
+At the single-stage starting point YOLOv1, matching was blunt: divide the image into an $S\times S$ grid. **Whichever cell contains an object's geometric center owns that object.**
+
+Cheap to compute, clearly defective in capacity:
+
+- **Capacity ceiling**: one cell serves one object. When two real objects occlude each other with centers projected into the same cell, assignment picks one and drops the other — the unpicked object gets zero positive supervision, a direct miss.
+- **Jitter-sensitive center assumption**: when a true center sits exactly on a cell boundary, tiny annotation noise or object motion flips positives between cells, destabilizing training.
+
+### Static IoU-threshold filtering on anchor templates
+
+To let one grid express multiple overlapping objects, Faster R-CNN's RPN and later SSD and RetinaNet introduced anchor-overlap assignment.
+
+The rule: preset multiple size/aspect-ratio templates per grid, compute IoU between every image-wide anchor and ground-truth boxes, and set a high threshold (e.g. 0.5 or 0.7) plus a low one (e.g. 0.3):
+
+1. Anchors above the high threshold with some ground truth become positives;
+2. anchors below the low threshold become negatives;
+3. anchors in between are ignored, contributing no gradients.
+
+Template overlap solved center collisions — different anchors in one grid match different scales or aspect ratios. But fixed human thresholds created new problems:
+
+- **Imbalanced matching bars across scales**: IoU is acutely size-sensitive. A tens-of-pixels small object occupies very few deep-map points; even its closest anchor falls below threshold after half a grid of center drift. A global 0.5 bar matches such objects to zero positives anywhere, so training never learns them.
+- **Static center bias**: static rules assume "geometrically closer anchors own better features". But deep features' receptive fields are shaped by stacked convolutions and downsampling — a centered anchor's features may already suffer occlusion or background interference, while a slightly offset point may hold cleaner discriminative features. Static geometry cannot sense feature quality itself.
+
+## Modern anchor-free matching: center sampling and scale shunting
+
+When FCOS, CenterNet, and other dense anchor-free detectors shed preset anchors, positive/negative splits returned to template-free pixel coordinates. Marking every pixel inside a true box positive causes two failure modes:
+
+1. **Edge low-quality interference**: large objects contain many points. Contour-edge points with missing semantics hold background-heavy receptive fields; forcing them to regress full object borders injects noisy gradients.
+2. **Overlap-region ownership conflict**: points inside two entities' overlapping boxes cannot tell which object supervises them.
+
+Without reintroducing anchors, modern dense anchor-free detectors adopted two assignment-level fixes:
+
+### Center sampling: shrinking to the geometric core
+
+FCOS and peers discarded "everything inside the box is positive" for **center sampling**:
+
+- Only points inside a shrunken sub-rectangle around the true box's geometric center (e.g. extending $1.5 \times \text{stride}$ pixels each way from the center) may activate as positives.
+- Edge points outside the core but inside the large true box compute no positive regression loss.
+
+Center sampling firewalls gradient quality at the assignment level: it keeps only the most discriminative core regions and severs low-quality edge-point gradient pollution.
+
+### FPN scale shunting: physical isolation across levels
+
+For assignment conflicts in overlaps, modern anchor-free detectors lean on their hard FPN binding:
+
+- Every pyramid prediction level gets hard-coded minimum/maximum regression-distance ranges (e.g. P3 measures $[0, 64]$-pixel objects, P7 handles $[256, \infty]$).
+- A point covered by both a small and a large object routes to different-depth maps by physical span, dissolving same-point semantic conflicts in the depth dimension.
+
+## Statistical adaptive selection: thresholds from ground-truth distributions (ATSS)
+
+Center sampling and anchor-based static assignment run, but both remain human hard-coded heuristics.
+
+**Adaptive Training Sample Selection (ATSS)** unified anchor-based and point-based assignment thinking. Its controlled experiments revealed a foundational fact: **the performance watershed between the two detector classes was never the rigid anchor templates on grids, but their positive/negative selection protocols.**
+
+ATSS broke fixed constant thresholds like global 0.5. Its logic: no human-drawn lines; instead each concrete ground-truth object earns its own admission bar computed from candidate statistics on that object.
+
+### The ATSS procedure
+
+1. For any ground-truth box $G$, take the $k$ candidate units closest to $G$'s center by geometric distance on each pyramid level (usually $k=9$). With $L$ levels, the object gathers $k \times L$ trial candidates image-wide.
+2. Compute their actual IoU set with $G$: $\mathcal{D} = \{\mathrm{IoU}_1, \mathrm{IoU}_2, \dots, \mathrm{IoU}_{k \times L}\}$.
+3. Compute the set mean $m = \frac{1}{|\mathcal{D}|} \sum_{i} \mathrm{IoU}_i$ and standard deviation $v = \sqrt{\frac{1}{|\mathcal{D}|} \sum_{i} (\mathrm{IoU}_i - m)^2}$.
+4. The object's bespoke positive threshold is:
+   $$
+   t_{\mathrm{ATSS}} = m + v
+   $$
+5. Only units with IoU at or above $t_{\mathrm{ATSS}}$ **and** centers inside the true box become positives.
+
+:::tip[The physics of the ATSS threshold]
+The mean $m$ measures how well current preset units geometrically fit this object's scale: large nearby objects overlap heavily overall, so the bar rises automatically; tiny distant objects overlap poorly everywhere, so the bar drops adaptively and no global one-size-fits-all cutoff ever starves small objects. The standard deviation $v$ measures which pyramid level suits the object best: a well-matched level contributes a few extreme IoUs, widening variance and tightening the bar to cherry-pick elite samples; mediocre levels everywhere shrink variance and avoid missing potential samples.
+:::
+
+ATSS still limits itself: dynamically computed bars derive entirely from **initial static geometric IoUs**. As feature weights evolve through iterations, a point already capable of top-quality boxes under current parameters stays rejected over a slightly low prior-template IoU. Further gains require judging models by "how well do you actually measure right now".
+
+## Dynamic costs and global assignment: SimOTA / TAL
+
+Once assignment incorporates the network's live predictive state, label assignment qualitatively shifts to **optimal-transport-style dynamic cost matching**.
+
+### Cost-matrix optimal transport (SimOTA)
+
+SimOTA frames assignment as cost minimization: given $M$ ground truths $\{G_1, \dots, G_M\}$ and $N$ prediction units $\{S_1, \dots, S_N\}$ in an image.
+
+Each unit $S_j$'s difficulty in serving object $G_i$ is measured by an explicit matching cost:
+
+$$
+C_{ij} = L_{\mathrm{cls}}(p_j, c_i) + \lambda L_{\mathrm{reg}}(b_j, g_i)
+$$
+
+- $p_j$ and $c_i$ are unit $S_j$'s current class probabilities and the object's true class; $L_{\mathrm{cls}}$ measures classification difficulty;
+- $b_j$ and $g_i$ are the current decoded box coordinates and ground-truth coordinates; $L_{\mathrm{reg}}$ is a regression loss (e.g. CIoU);
+- $\lambda$ balances classification and localization weights.
+
+Beyond cost scoring, SimOTA adds **dynamic $k$** deciding how many positives each object gets automatically: take the top-10 image-wide predicted-box IoUs with $G_i$, sum, and floor: $k_i = \max\bigl(1, \bigl\lfloor \sum_{m=1}^{10} \mathrm{IoU}_{im} \bigr\rfloor\bigr)$. Easily recognized objects earn larger $k_i$ for multi-point collaborative learning; fuzzy hard objects shrink $k_i$ adaptively to keep low-quality points from polluting gradients.
+
+When two overlapping objects contend for candidate units, the global cost matrix $C_{ij}$ assigns each unit uniquely to the object with smaller combined predictive cost (higher fit).
+
+### Task-aligned joint evaluation (TAL)
+
+TOOD's Task Alignment Learning (TAL) further repairs classification and localization branches optimizing separately.
+
+Traditional assignment watches space or simple weightings, producing the classic mismatch: "accurately localized boxes score low, high-scoring boxes drift". TAL proposes a unified alignment metric:
+
+$$
+t = s^\alpha \times \mathrm{IoU}^\beta
+$$
+
+- $s$ is the classification branch's predicted probability on the true class;
+- $\mathrm{IoU}$ is the predicted-versus-truth box overlap;
+- $\alpha, \beta$ are tradeoff coefficients.
+
+During assignment, TAL picks positives among local candidates directly by $t$, normalizes the alignment value into soft classification supervision labels, and weights localization losses by $t$. Classification and localization bind to one optimization direction at the assignment stage.
+
+## One-to-many and NMS: symbiosis and contradiction
+
+From static geometry through ATSS to SimOTA and TAL, one substrate feature persists throughout — **one-to-many assignment**. Every real object always maps to multiple spatial units in training.
+
+### One-to-many gains and prices
+
+- **Gain**: early in training with random parameters, multiple positive units per object emit abundant positive gradients, greatly accelerating backbone and head feature convergence.
+- **Price**: since training orders neighboring grids to predict the same object positively together, those positions naturally emit high-scoring candidate boxes together at inference. Around adjacent or occluded objects, overlap zones pile up many high-confidence, slightly drifted redundant boxes.
+
+Clearing them forces **non-maximum suppression (NMS)** as mandatory post-processing.
+
+### The NMS dilemma and hardware cost
+
+NMS sorts by score, then sequentially computes each top box's IoU against the rest, discarding boxes above a set threshold. Facing two highly overlapping objects, NMS deadlocks:
+
+- **Strict threshold (e.g. 0.5)**: slightly lower-scoring occluded objects die as foreground redundancies — severe misses;
+- **loose threshold (e.g. 0.7)**: occluded objects survive, but the foreground's ghost boxes pass through too.
+
+:::caution[The hardware price of NMS]
+NMS is textbook serial control-flow branching, extremely hard to parallelize efficiently on GPUs and dedicated accelerators — often the largest non-network share of end-to-end latency in real-time detection systems.
+:::
+
+## Pushing dedup into training: Hungarian one-to-one assignment
+
+To cut inference-side NMS completely, redundant responses must die at the training-assignment source. That is DETR's **one-to-one set prediction** route.
+
+### Hungarian bipartite matching
+
+In one-to-one systems, the network emits $N$ equal query units (e.g. $N=300$); the object set pads to $N$ with empty class $\varnothing$. The Hungarian algorithm finds the global bijection $\sigma \in \mathfrak{S}_N$ minimizing total match cost across all objects and units:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\mathrm{match}}(y_i, \hat{y}_{\sigma(i)}) &= -\hat{p}_{\sigma(i)}(c_i) + \mathcal{L}_{\mathrm{box}}(b_i, \hat{b}_{\sigma(i)}) \\
+\hat{\sigma} &= \arg\min_{\sigma \in \mathfrak{S}_N} \sum_{i=1}^N \mathcal{L}_{\mathrm{match}}(y_i, \hat{y}_{\sigma(i)})
+\end{aligned}
+$$
+
+The crux: **each real object signs exactly one minimum-cost unit among all $N$ image-wide units; every other unit takes background-$\varnothing$ punishment.**
+
+If two units chase one object, matching awards it to the better performer while forcing the other into background. Its high classification score earns no reward — only strong background suppression loss.
+
+Under sustained exclusive backpropagation, the network learns self-play during training: units sense each other through self-attention, spontaneously agreeing on one representative per object while the rest press their scores into background. **Inference needs only a confidence threshold filtering background — no NMS, naturally.**
+
+### The optimization price of one-to-one
+
+Strict one-to-one assignment pays in **sparse positive gradients**. Among thousands of image-wide feature units, each iteration grants positive regression signal to exactly as many units as ground truths. Original DETR consequently needs longer training schedules to converge stably.
+
+## Endgame confluence: dual assignment
+
+One-to-many trains on rich gradients but needs NMS at inference; one-to-one infers with zero post-processing but converges slowly early. With both mechanisms fully understood, engineering converged naturally: **dual label assignment** (exemplified by YOLOv10-style end-to-end detectors).
+
+Dual-assignment architectures share backbone and feature pyramid, splitting only two parallel heads at the end:
+
+![Dual assignment: one-to-many auxiliary and one-to-one main branches share the backbone; inference keeps only the one-to-one branch](/img/cv_img/object-detection/dual-assignment.png)
+
+1. **One-to-many auxiliary branch**: TAL or SimOTA assigns multiple positive units per object in training, computing auxiliary loss $\mathcal{L}_{\mathrm{o2m}}$ that feeds the shared backbone ample gradient updates for fast feature convergence;
+2. **one-to-one main branch**: strict Hungarian one-to-one matching in training computes main loss $\mathcal{L}_{\mathrm{o2o}}$, fitting exclusive single-object-single-response prediction on backbone-supported features;
+3. **joint total loss**: $\mathcal{L}_{\mathrm{total}} = \mathcal{L}_{\mathrm{o2o}} + \alpha \mathcal{L}_{\mathrm{o2m}}$.
+
+**At inference the one-to-many auxiliary branch is removed outright; only the one-to-one main branch predicts.**
+
+:::tip[The dual-assignment tradeoff]
+The design marries both: one-to-many accelerates convergence during training, one-to-one delivers NMS-free outputs at inference.
+:::
+
+## Assignment's boundary and the next question
+
+Label assignment draws a clean responsibility line in detection: **under a given optimization objective, it decides exactly which feature carriers each ground-truth object's supervision signal goes to.**
+
+- From center hits to anchor-based static IoU, detectors expressed overlapping objects through handcrafted geometric priors;
+- modern dense anchor-free methods raised sample purity without template constraints through center sampling and scale shunting;
+- statistical adaptation (ATSS) and dynamic cost matching (SimOTA / TAL) moved matching from fixed geometric rules to live network-capability evaluation;
+- the one-to-many versus one-to-one tradeoff pushed duplicate-prediction costs from inference post-processing into training loss functions, reconciled in dual-assignment architectures.
+
+But the moment some carrier is confirmed positive, the next core task arrives: by what exact mathematics does the network regress coordinates to pixel and sub-pixel precision? How do geometric losses close the gap between regression forms and evaluation metrics?
+
+That belongs to [Part 4: Box Representation and Regression Loss](./bbox-regression-loss).
