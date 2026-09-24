@@ -64,3 +64,17 @@
 .markdown img:not(a img) {
   cursor: zoom-in;
 }
+
+/* Footer: single copyright line styled to match the navbar — same
+   background (theme-adaptive) and same height (--ifm-navbar-height). */
+.footer {
+  --ifm-footer-background-color: var(--ifm-navbar-background-color);
+  --ifm-footer-padding-vertical: 0;
+}
+
+.footer .container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ifm-navbar-height);
+}

@@ -129,7 +129,6 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
       copyright: `Copyright \u00a9 ${new Date().getFullYear()} SAILTECHTEAM. Built with Docusaurus.`,
     },
     prism: {
