@@ -45,14 +45,23 @@ function mermaidSlideData(svg: SVGSVGElement): SlideData | null {
     return null;
   }
   const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.removeAttribute('id');
+  if (svg.id) {
+    const scopedId = `${svg.id}-lightbox`;
+    for (const element of [clone, ...Array.from(clone.querySelectorAll('*'))]) {
+      for (const attribute of Array.from(element.attributes)) {
+        attribute.value = attribute.value.replaceAll(svg.id, scopedId);
+      }
+    }
+    for (const style of Array.from(clone.querySelectorAll('style'))) {
+      style.textContent = style.textContent?.replaceAll(svg.id, scopedId) ?? '';
+    }
+  }
   clone.removeAttribute('style');
   clone.setAttribute('width', '100%');
   clone.setAttribute('height', '100%');
-  const background = getComputedStyle(document.body).backgroundColor;
   const html =
     `<div class="${MERMAID_VIEWER_CLASS}" style="touch-action:none;` +
-    `width:100%;height:100%;background:${background}">${clone.outerHTML}</div>`;
+    `width:100%;height:100%">${clone.outerHTML}</div>`;
   return {html, width, height, element: svg.parentElement ?? undefined};
 }
 

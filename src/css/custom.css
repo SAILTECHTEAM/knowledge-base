@@ -70,6 +70,14 @@
   cursor: zoom-in;
 }
 
+.pswp-mermaid-viewer {
+  background: white;
+}
+
+[data-theme='dark'] .pswp-mermaid-viewer {
+  background: var(--ifm-background-color);
+}
+
 /* Footer: single copyright line styled to match the navbar — same
    background (theme-adaptive) and same height (--ifm-navbar-height). */
 .footer {
