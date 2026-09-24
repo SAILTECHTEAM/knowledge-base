@@ -1,9 +1,48 @@
 import path from 'path';
-import {themes as prismThemes} from 'prism-react-renderer';
+import {themes as prismThemes, type Theme} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+
+// GitHub "Dark Dimmed" syntax colors; background matches the dark raised
+// surface (--ifm-background-surface-color) so code blocks sit one layer up
+// from the page canvas.
+const prismDarkDimmedTheme: Theme = {
+  plain: {color: '#adbac7', backgroundColor: '#262c28'},
+  styles: [
+    {types: ['comment', 'prolog', 'doctype', 'cdata'], style: {color: '#768390', fontStyle: 'italic'}},
+    {types: ['namespace'], style: {color: '#909dab'}},
+    {types: ['string', 'char', 'attr-value'], style: {color: '#96d0ff'}},
+    {types: ['punctuation', 'operator'], style: {color: '#adbac7'}},
+    {
+      types: [
+        'entity',
+        'url',
+        'symbol',
+        'number',
+        'boolean',
+        'variable',
+        'constant',
+        'property',
+        'regex',
+        'inserted',
+        'attr-name',
+      ],
+      style: {color: '#6cb6ff'},
+    },
+    {types: ['atrule', 'keyword', 'selector'], style: {color: '#f47067'}},
+    {types: ['function', 'function-variable', 'deleted'], style: {color: '#dcbdfb'}},
+    {types: ['tag'], style: {color: '#8dddd2'}},
+  ],
+};
+
+// GitHub light syntax colors, but on a white panel so code blocks read as
+// raised surfaces over the paper canvas.
+const prismLightTheme: Theme = {
+  ...prismThemes.github,
+  plain: {...prismThemes.github.plain, backgroundColor: '#ffffff'},
+};
 
 const config: Config = {
   title: 'Knowledge Base',
@@ -132,8 +171,8 @@ const config: Config = {
       copyright: `Copyright \u00a9 ${new Date().getFullYear()} SAILTECHTEAM. Built with Docusaurus.`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismLightTheme,
+      darkTheme: prismDarkDimmedTheme,
     },
   } satisfies Preset.ThemeConfig,
 };
