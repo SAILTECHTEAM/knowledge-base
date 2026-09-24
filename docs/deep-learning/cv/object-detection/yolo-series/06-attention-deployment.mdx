@@ -61,7 +61,7 @@ For a feature map of shape $H \times W \times C$:
 
 $$\mathcal{O}(\text{Area-Attn}) = l \times \left( 2 \left(\frac{n}{l}\right)^2 d + 4 \left(\frac{n}{l}\right) d^2 \right) = \frac{2 n^2 d}{l} + 4 n d^2$$
 
-Setting $l = 4$ reduces the quadratic term to **$\frac{1}{4}$** of its original cost, while each partition retains a receptive field covering one-quarter of the full feature map.
+Setting $l = 4$ reduces the quadratic term to **$\frac{1}{4}$** of its original cost, while each partition retains a receptive field covering one-quarter of the full feature map. The cost of this design: single-layer self-attention confined within each segment lost cross-region global interaction, leaving cross-region information flow to be recovered gradually by deeper layers. The authors accepted this compromise to bring quadratic attention complexity down to real-time-compatible levels.
 
 From an implementation perspective, area attention requires only a 1D flatten and reshape, avoiding 2D grid slicing. As long as the total token count $H \cdot W$ is divisible by $l$, rectangular inputs of arbitrary aspect ratios run forward inference without padding adjustments. Combined with **FlashAttention** tiled softmax memory optimization, this structure prevents memory retention bottlenecks for large attention matrices on GPUs.
 
@@ -98,6 +98,8 @@ To match convolutional execution latency on physical hardware, YOLOv12 applies f
 > Source: YOLOv12, Fig. 5 Heat map comparison, https://ar5iv.org/html/2502.12524
 
 These refactorings allow YOLOv12 to reduce parameters and FLOPs by over $60\%$ compared to Transformer-based real-time detectors like RT-DETR at equivalent accuracy, while matching or exceeding pure CNN inference speeds on standard GPUs.
+
+Architecturally, YOLOv12's core trade-off localized the globality of self-attention. The authors gave up unrestricted global multi-head attention, accepting within-segment interaction plus large-kernel convolutional position sensing in exchange for real-time forward speed on arbitrary-aspect-ratio inputs and stable training.
 
 ---
 

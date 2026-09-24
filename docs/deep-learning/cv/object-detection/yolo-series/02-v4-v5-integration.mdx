@@ -95,6 +95,8 @@ Mosaic provides three fundamental benefits:
 2. **Suppressing batch statistic variance**: batch normalization (BN) computes empirical mean and variance over the batch dimension $N \times H \times W$. With small per-GPU batch sizes, high estimation variance $\text{Var}[\hat{\mu}] = \sigma^2 / (N \cdot H \cdot W)$ destabilizes training. By packing four scenes into one input, Mosaic quadruples sample diversity per batch, stabilizing BN statistics even on single-GPU setups.
 3. **Breaking background-foreground spurious correlations**: in standard datasets, foreground objects strongly correlate with background contexts (for example, vehicles on roadways). Models easily exploit background textures as shortcuts. Mosaic splices unrelated backgrounds together (for example, placing a vehicle against sky or building textures), breaking these spurious correlations and forcing the model to focus on intrinsic object boundaries and textures.
 
+Mosaic's costs were significant: heavier CPU preprocessing in the data pipeline, mosaic seams that broke natural spatial continuity, and a need for substantially longer training schedules (typically 300+ epochs) to converge. The authors set aside mild single-image augmentations that preserved natural context, instead synthesizing dense composite images to strengthen generalization on small and occluded objects.
+
 ### Geometric Bounding Box Regression: From MSE/GIoU to CIoU Loss
 
 YOLOv1 used mean squared error (MSE) to independently regress coordinates, width, and height. Its major limitation is **scale dependence**: an absolute pixel error has a negligible effect on large boxes but causes complete misalignment on small boxes, allowing large-object gradients to dominate training.
@@ -161,6 +163,8 @@ $$b_x = s \cdot \sigma(t_x) - \frac{s - 1}{2} + c_x$$
 
 Setting $s = 1.05$ (or $s = 2.0$ in YOLOv5) expands the dynamic range of predicted center offsets to $(-0.5, 1.5)$. Reaching grid boundaries (0 or 1) requires only modest input values (for example, $t_x \approx \pm 3.7$), removing the gradient saturation bottleneck.
 
+At the architectural level, YOLOv4's guiding principle was to spend compute freely during training while strictly controlling inference cost. The authors accepted intricate hyperparameter tuning, longer training cycles, and heavier augmentation pipelines in exchange for accuracy gains from backbone reuse (CSP), receptive-field expansion (SPP/PANet), and geometric losses (CIoU) at zero or near-zero inference overhead.
+
 ---
 
 ## YOLOv5: Engineering Refactoring and Production Ecosystem
@@ -209,6 +213,8 @@ YOLOv5 formalized compound model scaling across a single architecture template. 
 - **YOLOv5m (Medium)** / **YOLOv5l (Large)** / **YOLOv5x (XLarge)**: optimized for desktop GPUs and high-throughput server environments.
 
 A unified codebase scales from sub-millisecond edge models to high-capacity server detectors. Coupled with built-in export pipelines for ONNX, TensorRT, OpenVINO, and CoreML, YOLOv5 established the benchmark deployment ecosystem for industrial computer vision.
+
+In engineering terms, YOLOv5's evolution pivoted decisively toward deployment friendliness and usability. The maintainers gave up theoretically lossless operator-level permutation (Focus slicing), accepting a slight increase in theoretical FLOPs from generic large-kernel convolutions in exchange for portable GEMM acceleration and seamless operator fusion across diverse accelerator chips — completing the transition from research model to industrial-grade software.
 
 ---
 
