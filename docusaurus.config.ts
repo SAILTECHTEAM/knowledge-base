@@ -1,9 +1,95 @@
 import path from 'path';
-import {themes as prismThemes} from 'prism-react-renderer';
+import {themes as prismThemes, type Theme} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+
+/** One-line `$$foo$$` is display math; `$foo$` stays inline. */
+function remarkDoubleDollarAsDisplay() {
+  return (tree: {children?: unknown[]}, file: {value?: unknown}) => {
+    const src = String(file.value ?? '');
+    const lines = src.split('\n');
+
+    const fromDoubleDollar = (node: {
+      value?: string;
+      position?: {start?: {offset?: number; line?: number}};
+    }) => {
+      const off = node.position?.start?.offset;
+      if (off != null && (src.startsWith('$$', off) || (off >= 2 && src.startsWith('$$', off - 2)))) {
+        return true;
+      }
+      const lineNo = node.position?.start?.line;
+      if (lineNo == null || node.value == null) {
+        return false;
+      }
+      const line = lines[lineNo - 1] ?? '';
+      return line.includes('$$' + node.value + '$$');
+    };
+
+    const visit = (node: {
+      type?: string;
+      data?: {hProperties?: {className?: unknown}};
+      children?: unknown[];
+      value?: string;
+      position?: {start?: {offset?: number; line?: number}};
+    }) => {
+      if (node.type === 'inlineMath' && fromDoubleDollar(node)) {
+        const cls = node.data?.hProperties?.className;
+        if (Array.isArray(cls)) {
+          node.data!.hProperties!.className = cls.map((c) =>
+            c === 'math-inline' ? 'math-display' : c,
+          );
+        }
+      }
+      if (Array.isArray(node.children)) {
+        for (const child of node.children) {
+          visit(child as typeof node);
+        }
+      }
+    };
+    visit(tree);
+  };
+}
+
+// GitHub "Dark Dimmed" syntax colors; background matches the dark raised
+// surface (--ifm-background-surface-color) so code blocks sit one layer up
+// from the page canvas.
+const prismDarkDimmedTheme: Theme = {
+  plain: {color: '#adbac7', backgroundColor: '#262c28'},
+  styles: [
+    {types: ['comment', 'prolog', 'doctype', 'cdata'], style: {color: '#768390', fontStyle: 'italic'}},
+    {types: ['namespace'], style: {color: '#909dab'}},
+    {types: ['string', 'char', 'attr-value'], style: {color: '#96d0ff'}},
+    {types: ['punctuation', 'operator'], style: {color: '#adbac7'}},
+    {
+      types: [
+        'entity',
+        'url',
+        'symbol',
+        'number',
+        'boolean',
+        'variable',
+        'constant',
+        'property',
+        'regex',
+        'inserted',
+        'attr-name',
+      ],
+      style: {color: '#6cb6ff'},
+    },
+    {types: ['atrule', 'keyword', 'selector'], style: {color: '#f47067'}},
+    {types: ['function', 'function-variable', 'deleted'], style: {color: '#dcbdfb'}},
+    {types: ['tag'], style: {color: '#8dddd2'}},
+  ],
+};
+
+// GitHub light syntax colors, but on a white panel so code blocks read as
+// raised surfaces over the paper canvas.
+const prismLightTheme: Theme = {
+  ...prismThemes.github,
+  plain: {...prismThemes.github.plain, backgroundColor: '#ffffff'},
+};
 
 const config: Config = {
   title: 'Knowledge Base',
@@ -51,6 +137,14 @@ const config: Config = {
   themes: ['@docusaurus/theme-mermaid'],
 
   plugins: [
+    function photoswipePlugin() {
+      return {
+        name: 'photoswipe-plugin',
+        getClientModules() {
+          return [path.resolve(__dirname, './plugins/photoswipe/client')];
+        },
+      };
+    },
     [
       'docusaurus-numbered-headings',
       {
@@ -87,9 +181,10 @@ const config: Config = {
       'classic',
       {
         docs: {
+          routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           editUrl: 'https://github.com/SAILTECHTEAM/knowledge-base/tree/main/',
-          remarkPlugins: [remarkMath],
+          remarkPlugins: [remarkMath, remarkDoubleDollarAsDisplay],
           rehypePlugins: [rehypeKatex],
           showLastUpdateTime: false,
         },
@@ -109,12 +204,6 @@ const config: Config = {
       title: 'Knowledge Base',
       items: [
         {
-          type: 'docSidebar',
-          sidebarId: 'tutorialSidebar',
-          position: 'left',
-          label: 'Docs',
-        },
-        {
           type: 'localeDropdown',
           position: 'right',
         },
@@ -126,29 +215,11 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
-      links: [
-        {
-          title: 'Sections',
-          items: [
-            {label: 'Deep Learning', to: '/docs/deep-learning/fundamental/'},
-            {label: 'Python Tutorial', to: '/docs/python-tutorial/'},
-            {label: 'Git Tutorial', to: '/docs/git-tutorial/'},
-            {label: 'Infrastructure', to: '/docs/infra/architecture-overview'},
-          ],
-        },
-        {
-          title: 'More',
-          items: [
-            {label: 'GitHub', href: 'https://github.com/SAILTECHTEAM/knowledge-base'},
-          ],
-        },
-      ],
       copyright: `Copyright \u00a9 ${new Date().getFullYear()} SAILTECHTEAM. Built with Docusaurus.`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismLightTheme,
+      darkTheme: prismDarkDimmedTheme,
     },
   } satisfies Preset.ThemeConfig,
 };
