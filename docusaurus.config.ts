@@ -130,23 +130,6 @@ const config: Config = {
     },
     footer: {
       style: 'dark',
-      links: [
-        {
-          title: 'Sections',
-          items: [
-            {label: 'Deep Learning', to: '/deep-learning/fundamental/'},
-            {label: 'Python Tutorial', to: '/python-tutorial/'},
-            {label: 'Git Tutorial', to: '/git-tutorial/'},
-            {label: 'Infrastructure', to: '/infra/architecture-overview'},
-          ],
-        },
-        {
-          title: 'More',
-          items: [
-            {label: 'GitHub', href: 'https://github.com/SAILTECHTEAM/knowledge-base'},
-          ],
-        },
-      ],
       copyright: `Copyright \u00a9 ${new Date().getFullYear()} SAILTECHTEAM. Built with Docusaurus.`,
     },
     prism: {
