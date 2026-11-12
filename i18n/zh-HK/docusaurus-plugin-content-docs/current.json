@@ -146,5 +146,9 @@
   "sidebar.tutorialSidebar.category.Analyzing the YOLO Series": {
     "message": "YOLO 系列解析",
     "description": "The label for category 'Analyzing the YOLO Series' in sidebar 'tutorialSidebar'"
+  },
+  "sidebar.tutorialSidebar.category.Analyzing the DETR Series": {
+    "message": "DETR 系列解析",
+    "description": "The label for category 'Analyzing the DETR Series' in sidebar 'tutorialSidebar'"
   }
 }

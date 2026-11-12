@@ -1,0 +1,85 @@
+---
+sidebar_position: 1
+title: "Overview"
+description: "A series roadmap tracing the evolution of DETR-based object detectors from direct set prediction to real-time end-to-end detection."
+---
+
+# Overview
+
+Before DETR (Detection Transformer, Carion et al., 2020), modern object detection was dominated by the dense-candidate paradigm. Whether anchor-based detectors such as Faster R-CNN and RetinaNet, or anchor-free detectors such as FCOS and CenterNet, the underlying logic was nearly identical: place thousands of candidate points or boxes on the dense spatial positions of an image feature map, and let the network predict, at each candidate location, whether an object exists and its corresponding offsets.
+
+The dense prediction paradigm carries two long-standing engineering burdens: **one-to-many label assignment** and **Non-Maximum Suppression (NMS)**. DETR's core contribution is a first-principles reformulation of detection: **treating object detection directly as a direct set prediction problem**. Instead of dense sliding-window scanning, DETR maintains a fixed-capacity set of object queries, aligns the $N$ predictions to the $M$ ground-truth objects through one-to-one bipartite matching, and removes NMS from the pipeline entirely.
+
+The original DETR, however, exposes two severe bottlenecks that define the mainline of subsequent research: slow convergence driven by global attention and unstable bipartite matching, and the quadratic computational cost of dense attention, which restricts the model to a single low-resolution feature scale. This series follows the chain of constraints rather than the paper release history — each part examines how one problem was posed, rewritten, and pushed back by new constraints.
+
+## Series Map
+
+### [Part 1: DETR — Network Architecture and Forward Pass](./detr-v1-architecture-forward-pass)
+
+Analyzes the conflict between variable-length unordered sets and fixed-shape computation graphs, and dissects the CNN backbone, two-dimensional positional encoding, Transformer encoder, and object query mechanism.
+
+### [Part 2: DETR — Bipartite Matching and Set Loss](./detr-v1-bipartite-matching-set-loss)
+
+Examines permutation invariance, optimal matching via the Hungarian algorithm, the construction of matching cost and set loss, and how one-to-one matching internalizes NMS.
+
+### [Part 3: Deformable DETR — Sparse Sampling and Multi-Scale Attention](./deformable-detr)
+
+Analyzes local sparse sampling, multi-scale deformable attention, the reference point interface, and the restructuring of the feature reading mechanism. Sparse sampling over reference points replaces global dense attention, enabling high-resolution multi-scale features and roughly a 10× faster convergence.
+
+### [Part 4: Conditional and DAB-DETR — Spatializing the Query](./conditional-dab-detr)
+
+Analyzes the spatial meaning of the object query and contrasts conditional spatial queries with the explicit 4D dynamic anchor box $(x, y, w, h)$ design, making the addressing target of cross-attention explicit.
+
+### [Part 5: DN-DETR — Query Denoising and Early Matching Stabilization](./dn-detr)
+
+Dissects the oscillation mechanism of one-to-one matching, and details target-level denoising query construction, attention mask design, and the training acceleration principle. The denoising bypass supplies deterministic gradients that bypass Hungarian matching instability.
+
+### [Part 6: DINO — Joint Design Across Three Interfaces](./dino)
+
+Analyzes the coordinated design of contrastive denoising, mixed query selection, and the look-forward-twice mechanism across three interfaces.
+
+### [Part 7: Group DETR — Training-Time Query Grouping](./group-detr)
+
+Analyzes the positive-sample sparsity caused by one-to-one matching, and explains multiple query groups, group-isolated self-attention, and independent within-group matching, plus the asymmetric training-inference implementation.
+
+### [Part 8: D-FINE — Bounding Box Distribution Refinement and Localization Self-Distillation](./d-fine)
+
+Replaces per-layer point estimates with discrete distributions over box boundaries, analyzing layer-wise interval shrinking, expectation-based decoding, and global-optimal localization self-distillation.
+
+### [Part 9: DEIM — Denser Matching and Matchability-Aware Loss](./deim)
+
+Analyzes the low-quality matches introduced by densified one-to-one matching, and breaks down dense one-to-one sample construction and the matchability-aware loss. Denser positives raise the utilization of each ground-truth object during training while preserving end-to-end inference.
+
+### [Part 10: RT-DETR and RT-DETRv2 — Latency Budgets and Deployment Constraints](./rt-detr)
+
+Decomposes end-to-end latency and its measurement, and covers the hybrid encoder (AIFI and CCFM), uncertainty-minimal encoder query selection, scalable decoder depth, and v2's per-scale sampling-point allocation and deployable discrete sampling. With these designs, Transformer detectors match or surpass advanced YOLO detectors in both speed and accuracy while keeping the NMS-free advantage.
+
+## Evolution Timeline
+
+| Model | Year | Key Innovation | Study Note |
+| :--- | :--- | :--- | :--- |
+| DETR | 2020 | Direct set prediction, bipartite matching, NMS-free inference | — |
+| Deformable DETR | 2021 | Multi-scale deformable attention, sparse reference-point sampling | — |
+| Conditional DETR | 2021 | Conditional spatial queries decoupling content and spatial attention | — |
+| DAB-DETR | 2022 | Explicit 4D dynamic anchor boxes as queries | — |
+| DN-DETR | 2022 | Denoising training to stabilize bipartite matching | — |
+| DINO | 2022 | Contrastive denoising, mixed query selection, look forward twice | — |
+| Group DETR | 2022 | Group-wise one-to-many assignment during training | — |
+| RT-DETR | 2023 | Hybrid encoder, uncertainty-minimal query selection, real-time latency | — |
+| D-FINE | 2024 | Fine-grained box distribution refinement, localization self-distillation | — |
+| DEIM | 2024 | Dense one-to-one matching, matchability-aware loss | — |
+| RT-DETRv2 | 2024 | Per-scale sampling points, deployable discrete sampling, improved baseline | — |
+
+## Reference Papers
+
+- N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and S. Zagoruyko, *End-to-End Object Detection with Transformers* (2020) — [arXiv:2005.12872](https://arxiv.org/abs/2005.12872)
+- X. Zhu, W. Su, L. Lu, B. Li, X. Wang, and J. Dai, *Deformable DETR: Deformable Transformers for End-to-End Object Detection* (2021) — [arXiv:2010.04159](https://arxiv.org/abs/2010.04159)
+- D. Meng, X. Chen, Z. Fan, G. Zeng, Y. Li, Y. Sun, K. Shen, and L. Shao, *Conditional DETR: An Explicit Conditioning Perspective for End-to-End Object Detection* (2021) — [arXiv:2108.06152](https://arxiv.org/abs/2108.06152)
+- S. Liu, F. Li, H. Zhang, X. Yang, Y. Xie, M. Ni, L. Shao, and C. Zhang, *DAB-DETR: Dynamic Anchor Boxes are Better Queries for DETR* (2022) — [arXiv:2201.12329](https://arxiv.org/abs/2201.12329)
+- F. Li, H. Zhang, S. Liu, J. Guo, L. M. Ni, and P. Zhang, *DN-DETR: Accelerate DETR Training by Introducing Query DeNoising* (2022) — [arXiv:2203.01305](https://arxiv.org/abs/2203.01305)
+- H. Zhang, F. Li, S. Liu, L. Zhang, H. Su, J. Zhu, L. M. Ni, and H.-Y. Shum, *DINO: DETR with Improved DeNoising Anchor Boxes for End-to-End Object Detection* (2022) — [arXiv:2203.03605](https://arxiv.org/abs/2203.03605)
+- S. Chen, X. Sun, S. He, and S. Xu, *Group DETR: Fast DETR Training with Group-wise One-to-Many Assignment* (2022) — [arXiv:2207.13085](https://arxiv.org/abs/2207.13085)
+- Y. Zhao, B. Xu, and Z. Lv, *DETRs Beat YOLOs on Real-time Object Detection* (2023) — [arXiv:2304.08069](https://arxiv.org/abs/2304.08069)
+- S. Peng, K. Wu, S. Chen, H. Feng, C. Zhou, and L. Shao, *D-FINE: Redefine Regression Task in DETR as Fine-grained Distribution Refinement* (2024) — [arXiv:2410.13842](https://arxiv.org/abs/2410.13842)
+- S. Huang, H. Feng, C. Du, S. Peng, D. Zhao, and L. Shao, *DEIM: DETR with Improved Matching for Fast Convergence* (2024) — [arXiv:2412.04234](https://arxiv.org/abs/2412.04234)
+- W. Lv, S. Xu, Y. Zhao, G. Wang, J. Wei, C. Cui, and Q. Dang, *RT-DETRv2: Improved Baseline with Denoising and Real-Detection Friendly Queries* (2024) — [arXiv:2407.17140](https://arxiv.org/abs/2407.17140)
