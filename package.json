@@ -26,6 +26,7 @@
     "clsx": "^2.0.0",
     "docusaurus-numbered-headings": "^1.5.2",
     "katex": "^0.16.38",
+    "pele": "^1.13.0",
     "photoswipe": "^5.4.4",
     "prism-react-renderer": "^2.3.0",
     "react": "^19.0.0",

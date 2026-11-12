@@ -153,17 +153,51 @@ html[data-theme='dark'] blockquote {
   cursor: zoom-in;
 }
 
-/* Mermaid diagrams open in the same PhotoSwipe lightbox on click. */
-.docusaurus-mermaid-container svg {
-  cursor: zoom-in;
+/* Mermaid diagrams are rendered by Pele (Obsidian 1.15's engine), themed via
+   --pele-* CSS variables mapped to the site palette. The vars are also set on
+   the PhotoSwipe viewer because the lightbox clones the SVG out of the
+   container, so it must carry its own copy of the theme. */
+.docusaurus-mermaid-container,
+.pswp-mermaid-viewer {
+  --pele-font: var(--ifm-font-family-base);
+  --pele-font-mono: var(--ifm-font-family-monospace);
+  --pele-bg: #ffffff;
+  --pele-fg: #32383f;
+  --pele-fg-on-light: #32383f;
+  --pele-fg-on-dark: #ffffff;
+  --pele-muted: #656d76;
+  --pele-line: #32383f;
+  --pele-surface: #f5f8f5;
+  --pele-surface-alt: #e7ece8;
+  --pele-border: #d0d7de;
+  --pele-accent: #2e8555;
+  --pele-critical: #cf222e;
+  --pele-error: #cf222e;
+}
+
+html[data-theme='dark'] .docusaurus-mermaid-container,
+html[data-theme='dark'] .pswp-mermaid-viewer {
+  --pele-bg: #262c28;
+  --pele-fg: #adbac7;
+  --pele-fg-on-light: #32383f;
+  --pele-fg-on-dark: #ffffff;
+  --pele-muted: #7d8996;
+  --pele-line: #adbac7;
+  --pele-surface: #343e38;
+  --pele-surface-alt: #1e2320;
+  --pele-border: #444c56;
+  --pele-accent: #25c2a0;
+  --pele-critical: #e5534b;
+  --pele-error: #e5534b;
 }
 
 .pswp-mermaid-viewer {
-  background: white;
+  background: var(--pele-bg);
 }
 
-[data-theme='dark'] .pswp-mermaid-viewer {
-  background: var(--ifm-background-color);
+/* Mermaid diagrams open in the same PhotoSwipe lightbox on click. */
+.docusaurus-mermaid-container svg {
+  cursor: zoom-in;
 }
 
 /* Footer: single copyright line styled to match the navbar — same

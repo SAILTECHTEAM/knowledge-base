@@ -56,7 +56,10 @@ function mermaidSlideData(svg: SVGSVGElement): SlideData | null {
       style.textContent = style.textContent?.replaceAll(svg.id, scopedId) ?? '';
     }
   }
-  clone.removeAttribute('style');
+  // Keep the root style attribute: Pele's inline style carries the
+  // --pele-* → --_* variable bridge that every fill/stroke in the SVG
+  // references; stripping it makes fills resolve to black and strokes to
+  // none. Unlike Mermaid.js, Pele's style holds no background color.
   clone.setAttribute('width', '100%');
   clone.setAttribute('height', '100%');
   const html =
