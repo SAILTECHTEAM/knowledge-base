@@ -1,0 +1,152 @@
+---
+sidebar_position: 8
+title: "Multi-Scale Features and Neck Architectures"
+description: "Neck information-flow evolution: SSD independent prediction, FPN top-down, PANet bidirectional, BiFPN weighted fusion, and the RT-DETR hybrid encoder."
+---
+
+# Multi-Scale Features and Neck Architectures
+
+Backbones typically downsample three times, with feature strides (feature-map downsampling factor relative to input) of $8$, $16$, $32$ in sequence. A $16$-pixel small object spans $2\times 2$ points on the stride-8 $80\times 80$ map, $1\times 1$ on stride-16, and $0.5\times 0.5$ on stride-32 $20\times 20$. Past high-ratio downsampling, its features inevitably blend inseparably with surrounding background.
+
+The structural contradiction: stride-32 deep maps pass through dozens of nonlinear transforms and wide pooling — large receptive fields, strongest semantic expression — but small-object spatial detail dies in layer-by-layer downsampling; stride-8 shallow maps keep crisp edges and geometric contours but run few convolutional layers with limited receptive fields, lacking the high-level semantics classification needs. Classifying directly on shallow features misfires for missing context; detecting small objects directly on deep features fails for missing spatial resolution. Neck networks exist to build cross-resolution feature pathways between backbones and heads. Detectors since 2017 generally contain feature-pyramid structures, whose substantive differences lie not in convolution counts but in inter-map information-flow directions and fusion styles.
+
+## Independent prediction limits: shallow lacks semantics, deep lacks detail
+
+Before feature pyramids matured, single-stage networks handled multi-scale mainly through SSD: different-depth maps take different-scale prediction duties.
+
+In standard SSD, the network taps multiple differently sized maps from backbone stages directly. High-resolution shallow maps detect small objects; deep low-resolution large-receptive-field maps detect large ones. Every map connects its own classification-plus-regression convolution heads independently, with zero lateral information exchange between levels.
+
+Fully independent division cannot satisfy small objects' semantic needs and localization needs together:
+
+1. Shallow maps (e.g. stride $8$) hold $80\times 80$ spatial resolution covering small-object extents, but their features come straight from shallow convolutions — small receptive fields, missing surrounding-scene context. Classification heads on this level get semantically shallow features: small-object confidences run low or confuse with similarly textured backgrounds.
+2. Deep maps (e.g. stride $32$) discriminate semantically strongly, but small-object high-frequency spatial information died in layer-by-layer strided convolutions and pooling. Shrunk to $20\times 20$, neighboring points sit $32$ image pixels apart; small-object information averages with background inside single points, and regression heads cannot recover precise border coordinates from coarse grids.
+
+SSD's limits show backbone-native resolution division cannot cover multi-scale detection. With isolated levels, however strong deep computation never passes semantics shallow, and however high shallow resolution never passes localization detail deep. Information channels between depths are mandatory.
+
+## Top-down: passing deep semantics shallow
+
+The modern feature-pyramid standard is FPN. Its founding judgment: shallow small-object inaccuracy comes mostly from missing semantics; computed deep semantics should travel back shallow along a top-down path.
+
+In FPN (Feature Pyramid Network), bottom-up backbone maps are $C_2, C_3, C_4, C_5$ with typical strides $4, 8, 16, 32$. FPN builds one top-down pathway generating same-channel-count new maps $P_2, P_3, P_4, P_5$. Level-wise fusion:
+
+$$
+P_k = \mathrm{Conv}_{3\times 3}\Big(\mathrm{Upsample}(P_{k+1}) + \mathrm{Conv}_{1\times 1}(C_k)\Big)
+$$
+
+Each term serves an explicit function:
+
+- $C_k$ is backbone stage $k$'s raw map. Deeper stages carry more channels (e.g. $C_3$ at 256 versus $C_5$ at 1024); $\mathrm{Conv}_{1\times 1}$ compresses channels to a preset width (usually 256) so different levels add in one dimensional space.
+- $P_{k+1}$ is the next-deeper pyramid feature. Upsampling ($\mathrm{Upsample}$, usually nearest-neighbor or bilinear interpolation) doubles spatial resolution each way to match current-level $C_k$ size.
+- The two fuse through element-wise addition. Addition adds no channels, saving memory and compute, while requiring $1\times 1$-projected shallow features and upsampled deep features to align into one semantic representation space. The alternative, channel concatenation, doubles channels and downstream head compute.
+- The outer $\mathrm{Conv}_{3\times 3}$ removes upsampling aliasing artifacts. Nearest-neighbor upsampling creates spatial discontinuities; one $3\times 3$ convolution smooths them into final prediction maps $P_k$.
+
+With the top-down pathway, take stride-8 small-object detection: $C_5$ (stride-32) high-level semantics upsample, fuse with $C_4$ into $P_4$, upsample again and fuse with $C_3$ into $P_3$. The resulting $P_3$ holds both $C_3$'s raw geometric borders and $P_5$/$P_4$ high-level classification context. Shallow maps gain spatial resolution and abstract semantics together — small-object recall improves accordingly.
+
+But FPN information flows one way. Deep semantics reach shallow layers, yet shallow localization detail has no dedicated return path deep. Large hundred-pixel objects usually assign to large-receptive-field levels like $P_4$ or $P_5$. Without directly passed shallow edge information, $P_5$-predicted borders wobble slightly at object contours. FPN fixes shallow semantic expression; deep localization imprecision persists.
+
+## Bottom-up: passing shallow localization deep
+
+For deep-feature localization imprecision, PANet appends a bottom-up pathway after FPN's top-down one.
+
+FPN proves top-down semantic passing works, but in conventional convolutional networks bottom features reach the deepest layers only through a hundred-plus convolutions and repeated pooling — a long path where high-frequency localization signals decay steadily. PANet builds a few-convolution short path shipping shallow spatial-position information straight deep.
+
+PANet's front end reuses FPN pyramid maps $\{P_2, P_3, P_4, P_5\}$, then constructs enhanced maps $\{N_2, N_3, N_4, N_5\}$:
+
+1. The bottom $N_2$ comes straight from $P_2$: $N_2 = P_2$.
+2. Each $N_k$-to-$N_{k+1}$ step runs through stride-2 downsampling convolution:
+
+   $$
+   N_{k+1} = \mathrm{Conv}_{3\times 3}\Big(\mathrm{Downsample}_{2\times}(N_k)\Big) + P_{k+1}
+   $$
+
+   Downsampling uses stride-2 $3\times 3$ convolutions directly, halving spatial size while extracting local structure, then element-wise adding same-scale $P_{k+1}$.
+
+The division of labor is explicit: FPN fixes shallow maps missing semantics, flowing top-down; PANet fixes deep maps' coarse borders, flowing bottom-up.
+
+When $N_5$ (stride $32$) generates, it no longer depends solely on the backbone's hundred-layer long path. Three cross-level downsampling convolutions $N_2 \to N_3 \to N_4 \to N_5$ gather bottom-edge localization information deep. Large objects regressing borders on $N_5$ exploit shallow-passed pixel-level boundary information, visibly reducing box localization offsets.
+
+Green branches show FPN's top-down structure: $C_k$ fuses through lateral connections with upsampled $P_{k+1}$. Orange branches show PANet's added bottom-up structure passing shallow edge information deep.
+
+![FPN versus PANet structures: green branches pass FPN top-down semantics, orange branches pass PANet bottom-up localization](/img/cv_img/object-detection/fpn-panet.png)
+
+After this topology proved out, NAS-FPN tried neural architecture search for cross-scale connections automatically. Searched topologies ran overly complex, incurring scattered memory-access overhead with clearly rising deployment latency. Engineering consensus kept: bidirectional flow topology is the most balanced compute-versus-accuracy foundation.
+
+## Weighted fusion: adaptive cross-scale contribution
+
+With FPN and PANet establishing top-down plus bottom-up pathways, research turned to fusion nodes' mathematics.
+
+FPN and PANet combine size-aligned multi-source maps through plain element-wise addition — implicitly assuming shallow and deep inputs matter equally.
+
+In reality, different-resolution maps carry unequal information quality. For small objects, shallow maps mainly supply border-localization information and deep maps mainly class semantics; for large objects, deep maps supply dominant discriminative semantics while shallow detail textures risk background interference. Straight $1:1$ addition forces many early-training iterations just to learn balancing relative input strengths.
+
+BiFPN attacks this with learnable normalized weights at fusion nodes. Weighted feature fusion:
+
+$$
+O = \sum_{i} \frac{w_i}{\epsilon + \sum_{j} w_j} \cdot I_i
+$$
+
+Symbols unfold with the computation:
+
+- $I_i$ is the $i$-th input map converging on the current node. Before summing, upsampling, downsampling, or $1\times 1$ convolutions align all inputs to identical spatial sizes and channel counts.
+- $w_i$ is the learnable scalar weight for input $i$. ReLU activation outside $w_i$ ($w_i \ge 0$) keeps weights nonnegative.
+- Denominator $\sum_{j} w_j$ sums all pathway weights, normalizing with the numerator to bound each input's relative contribution in $[0, 1]$ — Softmax-like numerically without exponentials; $\epsilon$ is a tiny constant (usually $0.0001$) guarding zero denominators.
+- $O$ is the weighted-fused output map.
+
+Beyond weighting, BiFPN adjusts topology twice: first, deleting single-input-edge nodes without feature fusion to save compute; second, adding skip connections between same-scale raw backbone inputs and outputs so raw input features join final fusion directly.
+
+:::note[BiFPN's technical position]
+BiFPN introduces no new information-flow direction. Its skeleton stays top-down plus bottom-up bidirectional topology; its role is assigning learnable weights to each input on existing pathways, letting the network adjust each pathway's relative contribution by detection performance across scales.
+:::
+
+## Split interaction: attention within scales, convolution across scales
+
+As Transformer architectures entered detection, query-based DETR-family models moved toward real-time. Feature-pyramid design hit a new compute bottleneck in the transition.
+
+In Deformable-DETR-style models, full multi-scale fusion runs multi-scale deformable attention modules directly, with every feature point attending sampling points at all scales (strides $8$, $16$, $32$) simultaneously. Theoretically global, computationally heavy.
+
+RT-DETR made one key judgment: **same-scale feature interaction and cross-scale feature fusion are not the same task class; processing both in one mixed module wastes compute.**
+
+Their computational characters differ plainly:
+
+1. **Within-scale semantic interaction**: happens mostly on deep low-resolution maps (e.g. stride $32$, $20\times 20$). Only 400 points total — global self-attention costs little. Each deep point represents one local region's high-level semantics; pairwise interaction among 400 points effectively builds long-range context (e.g. judging whether distant objects in one scene are semantically related).
+2. **Cross-scale feature passing**: spans resolutions (e.g. passing stride-$32$ semantics to stride-$8$ $80\times 80$ maps). On $80\times 80$ high-resolution maps, 6,400 points make direct global self-attention costs grow quadratically. But cross-scale's core need — passing high-level semantics to corresponding low-level spatial positions — is essentially local spatial-structure passing, where convolution and interpolation suit local transforms better.
+
+From this decoupling logic, RT-DETR designed the hybrid encoder. Data flow runs as shown: orange AIFI connects only $C_5$; the green dashed CCFM box handles cross-scale fusion. $F_3,F_4,F_5$ are top-down upsampling fusions, $N_3,N_4,N_5$ bottom-up downsampling fusions, emitting $P_3,P_4,P_5$ finally.
+
+![RT-DETR hybrid encoder: AIFI runs self-attention at the deep single scale; CCFM does convolutional cross-scale bidirectional fusion](/img/cv_img/object-detection/rt-detr-hybrid-encoder.png)
+
+- **Attention-based Intra-scale Feature Interaction (AIFI)**: Transformer self-attention runs only on the computationally small, semantically richest deep map (stride $32$), capturing large-object global context and inter-object relations.
+- **CNN-based Cross-scale Feature Fusion (CCFM)**: shallow-to-mid maps use convolutional top-down plus bottom-up bidirectional fusion structures, completing fusion with $1\times 1$ convolutions, interpolation, and convolution blocks.
+
+:::tip[RT-DETR's decoupling choice]
+Global attention suits same-level concept association; local convolution suits low-cost cross-level spatial passing. Confining attention to the deep single scale while returning multi-scale fusion to lightweight convolution avoids attention's high-resolution-grid compute while keeping long-range context modeling.
+:::
+
+## Mechanism comparison across canonical structures
+
+The five designs' evolution in flow topology, compute mechanism, and core payoff summarizes as:
+
+| Design | Flow direction and topology | Core contradiction solved | Typical price and limit | Core engineering verdict |
+| :--- | :--- | :--- | :--- | :--- |
+| **SSD** | No cross-level communication; each scale map outputs to heads independently | Exploiting natural multi-scale division across depths for prediction | Shallow maps lack semantics; deep maps cannot keep small-object positions | Backbone-native resolution division alone cannot resolve scale conflict; levels must connect |
+| **FPN** | Single-direction top-down; deep features upsample and add level-by-level through lateral connections | Passing deep high-level semantics shallow, giving shallow layers small-object recognition | Shallow localization information never passes back deep; deep large-object precision lags | The modern detection pyramid's base paradigm; one-way semantic passing pays well |
+| **PANet** | Bidirectional: top-down semantic passing first, bottom-up localization passing after | Shortening bottom-localization-signal paths to the top, improving deep large-object box regression | One extra feature-downsampling path; slightly higher memory and latency | Bidirectional topology becomes the multi-scale fusion standard, easing deep localization-signal decay |
+| **BiFPN** | Bidirectional topology with learnable normalized node weights; fusion-less nodes removed | Ending equal-weight assumptions in naive addition; adaptively adjusting relative strengths per scale | Needs careful per-channel learning-rate and regularization tuning; relatively fixed topology | Creates no new flow direction; dynamically allocates weights on existing bidirectional pathways |
+| **RT-DETR hybrid encoder** | Deep single-scale global self-attention; lightweight convolutional bidirectional multi-scale fusion across levels | Separating same-scale global semantic interaction from cross-scale spatial fusion, cutting compute | Shallow maps never directly gain nonlocal global-attention view | Separate by task nature: deep attention for semantic association, all-layer lightweight convolution for multi-scale passing |
+
+From SSD to RT-DETR, multi-scale modules advanced along one clear trunk: independent prediction first, one-way top-down semantic supplementation next, bidirectional localization-information return after, then fine-grained fusion-weight allocation on each pathway, finally splitting same-level semantic interaction from cross-level structural fusion into distinct compute mechanisms.
+
+## After multi-scale fusion: closing the five-component loop
+
+With multi-scale fusion pathways built, shallow high-resolution maps hold spatial detail and deep semantics together; deep low-resolution maps hold global context and shallow-passed edge information together.
+
+All five detection-system components are now in place:
+
+- In [Part 1](./prediction-carrier), prediction carriers decide how networks geometrically organize candidate predictions in space;
+- in [Part 2](./feature-sampling), feature sampling solves accurate local-feature collection from continuous coordinate space;
+- in [Part 3](./label-assignment), label assignment establishes positive/negative-sample optimization objectives and decides NMS necessity;
+- in [Part 4](./bbox-regression-loss), box representation and localization losses achieve continuous approximation from deterministic point regression to probability-distribution modeling;
+- in [Part 5](./classification-head), classification scores and detection heads complete category-confidence versus localization-quality alignment;
+- and in this article, multi-scale feature fusion opens cross-resolution information pathways between backbones and heads.
+
+With multi-scale pathways established, five components form the complete detection pipeline on unified data flow. Any object-detection network's structural change finds its analytical position in this system.

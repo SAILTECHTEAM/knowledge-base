@@ -94,7 +94,6 @@
     "message": "PyTorch Lightning",
     "description": "The label for category 'PyTorch Lightning' in sidebar 'tutorialSidebar'"
   },
-  
   "sidebar.tutorialSidebar.category.NLP": {
     "message": "自然语言处理",
     "description": "The label for category 'NLP' in sidebar 'tutorialSidebar'"
@@ -143,12 +142,10 @@
     "message": "混合精度训练和 torch.compile 编译加速。",
     "description": "The generated-index page description for category 'Performance Optimization' in sidebar 'tutorialSidebar'"
   },
-  
   "sidebar.tutorialSidebar.category.PyTorch Lightning.link.generated-index.description": {
     "message": "组织 PyTorch 代码，将科研与工程解耦。",
     "description": "The generated-index page description for category 'PyTorch Lightning' in sidebar 'tutorialSidebar'"
   },
-  
   "sidebar.tutorialSidebar.category.pytorchTutorial.cv.link.generated-index.description": {
     "message": "从 Torchvision 基础到高级图像分类与分割。",
     "description": "The generated-index page description for category 'Computer Vision' in sidebar 'tutorialSidebar'"
@@ -160,5 +157,17 @@
   "sidebar.tutorialSidebar.category.Time Series.link.generated-index.description": {
     "message": "时间序列预测模型及特定的数据处理技术。",
     "description": "The generated-index page description for category 'Time Series' in sidebar 'tutorialSidebar'"
+  },
+  "sidebar.tutorialSidebar.category.Object Detection": {
+    "message": "目标检测",
+    "description": "The label for category 'Object Detection' in sidebar 'tutorialSidebar'"
+  },
+  "sidebar.tutorialSidebar.category.Deconstructing Object Detection": {
+    "message": "目标检测解构",
+    "description": "The label for category 'Deconstructing Object Detection' in sidebar 'tutorialSidebar'"
+  },
+  "sidebar.tutorialSidebar.category.Analyzing the YOLO Series": {
+    "message": "YOLO 系列解析",
+    "description": "The label for category 'Analyzing the YOLO Series' in sidebar 'tutorialSidebar'"
   }
 }

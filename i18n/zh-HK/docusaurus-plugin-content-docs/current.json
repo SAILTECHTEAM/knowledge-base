@@ -134,5 +134,17 @@
   "sidebar.tutorialSidebar.category.Time Series.link.generated-index.description": {
     "message": "時間序列預測模型及特定的數據處理技術。",
     "description": "The generated-index page description for category 'Time Series' in sidebar 'tutorialSidebar'"
+  },
+  "sidebar.tutorialSidebar.category.Object Detection": {
+    "message": "目標檢測",
+    "description": "The label for category 'Object Detection' in sidebar 'tutorialSidebar'"
+  },
+  "sidebar.tutorialSidebar.category.Deconstructing Object Detection": {
+    "message": "目標檢測解構",
+    "description": "The label for category 'Deconstructing Object Detection' in sidebar 'tutorialSidebar'"
+  },
+  "sidebar.tutorialSidebar.category.Analyzing the YOLO Series": {
+    "message": "YOLO 系列解析",
+    "description": "The label for category 'Analyzing the YOLO Series' in sidebar 'tutorialSidebar'"
   }
 }

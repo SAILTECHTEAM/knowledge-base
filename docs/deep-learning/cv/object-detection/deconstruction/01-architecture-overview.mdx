@@ -1,0 +1,57 @@
+---
+sidebar_position: 2
+title: "Architecture and Core Components"
+description: "A positioning map over mainstream detection systems: the assembly logic of the five core components, and why anchors and NMS belong to different components."
+---
+
+# Architecture and Core Components
+
+In computer vision, object detection (OD) asks for localization (finding object boundaries) and classification (recognizing object categories) in the same image. The task looks straightforward, but in practice the network must handle extreme scale variation, complex spatial overlap and occlusion, and massive background noise.
+
+Underneath, every detection system is essentially assembled from five independently replaceable core components (defined in the series overview). The table below lists the specific choices and mechanism-level implications of four representative classical systems directly:
+
+<div className="wide-table">
+
+| System | Prediction carrier | Feature sampling | Label assignment (with NMS implication) | Head outputs (box encoding / classification head) | Multi-scale fusion | Mechanism implication |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **YOLOv1** | $S\times S$ discrete spatial grid (single scale, e.g. a $20\times 20$ grid with a fixed number of candidate boxes per cell) | Global flattening through fully connected layers (dense FC readout) | Geometric hard assignment by object-center location (one cell owns one object; multiple boxes compete; dense grid responses across the image require NMS at inference) | Grid-relative normalized offset coordinates $(x, y, w, h)$ + product of global conditional class probabilities and box confidence | No feature pyramid (a single stride-32 deep feature map feeds the heads directly) | Hard grid binding locks single-cell multi-object capacity; FC sampling breaks translation invariance; missing shallow features make small objects unrecallable. |
+| **Faster R-CNN** | Sliding-window anchor templates (RPN stage) and second-stage region proposals (RoI proposals) | Local region feature cropping and resampling (RoI Pooling / RoIAlign) | Static one-to-many overlap matching with IoU thresholds; dense neighboring anchors fire repeatedly on the same object, so inference requires NMS to suppress redundancy | Scale-normalized log-space offsets relative to prior anchors $(\Delta x, \Delta y, \Delta w, \Delta h)$ + Softmax class distribution from independent fully connected layers | No cross-scale fusion initially; a top-down single-direction feature pyramid (FPN) added later | Two-stage RoI sampling fully decouples local features from global image space; dense anchors buy high recall but manufacture severe background-negative redundancy; one-to-many assignment mandates NMS cleanup of overlapping boxes. |
+| **FCOS** | Dense pixel points on multi-level pyramid feature maps (about 8,400 point prediction units across three pyramid levels) | Fully convolutional dense sliding point sampling (shared kernels applied locally at every spatial position) | Points inside a ground-truth box count as positives, combined with multi-scale range shunting (one-to-many); hundreds of interior points fire together, so inference still requires NMS | Four-direction absolute physical distances to borders $(l, t, r, b)$ + centerness scalar and per-class binary classification (BCE / Focal Loss) | Top-down feature pyramid (FPN) with hard per-level maximum-regression-range constraints | Removing anchor size hyperparameters reduces geometric regression to pixel-distance measurement; multi-scale shunting resolves spatial overlap conflicts, but dense spatial binding plus one-to-many assignment keeps the NMS burden. |
+| **DETR** | A fixed number (e.g. 100 or 300) of globally learned object queries | Transformer decoder cross-attention addressing the full-image features globally | Hungarian-algorithm bipartite matching with global minimum cost, strictly one-to-one; inference needs no NMS | Image-normalized absolute center coordinates and sizes $(c_x, c_y, w, h)$ + global class distribution including a background empty class ($\varnothing$) | Early versions flatten a single feature level with self-attention; later multi-scale deformable attention or hybrid encoder structures (AIFI+CCFM) | Decoupling carriers from the pixel grid plus one-to-one matching eliminates duplicate responses at the training-objective source, freeing detection from hand-designed NMS post-processing for the first time. |
+
+</div>
+
+The table shows that a detector's character is not a vague style but the simultaneous solution of its five component choices. Changing one component's choice reconstructs the system's input-output protocol and performance envelope.
+
+## Anchors and NMS are not a coupled concept
+
+A common misreading treats anchors and non-maximum suppression (NMS) as inseparable twins, even concluding that anchor-free implies NMS-free. The opposite holds. Anchors and NMS belong to two entirely different components: anchors are geometric parameterization templates inside the **prediction carrier** component, solving local spatial capacity and aspect-ratio priors; NMS is the inevitable consequence of choosing a one-to-many assignment protocol inside the **label assignment** component.
+
+The four systems above demonstrate their independence:
+
+- **YOLOv1** is a textbook anchor-free design using only spatial grids and template-free offset prediction, yet it must run NMS at inference. Neighboring cells facing the same object still emit multiple high-scoring boxes along its boundary.
+- **FCOS** drops anchors entirely in favor of pure feature pixels as carriers. But at label-assignment time, every point inside a ground-truth box is marked positive. A large central pedestrian can contain hundreds of feature pixels, meaning training orders hundreds of points to predict the same pedestrian simultaneously. At inference they naturally produce hundreds of highly overlapping boxes, which NMS must forcibly collapse down to the highest-scoring central one.
+- What actually removes NMS is **DETR** and later **YOLOv10**. DETR's Hungarian bipartite matching enforces before loss computation that each ground-truth object matches exactly one minimum-cost unit across all candidates, with the rest penalized as background. Trained under single-object-single-response constraints, query units repel each other through self-attention, so the output set contains no duplicate predictions by construction. YOLOv10 keeps dense point prediction but adds dual label assignment with one-to-one matching on the inference branch, achieving NMS-free inference the same way.
+
+:::note[The single factor deciding NMS]
+The only factor deciding whether inference needs NMS is whether the label-assignment protocol is one-to-many or one-to-one. Whether carriers are anchors, grids, or pixels has no direct causal link to NMS survival.
+:::
+
+## Do not treat YOLO as a standalone school
+
+Industry habit and beginners often split detection into three disconnected schools: two-stage networks, the YOLO family, and Transformer detectors. This code-repository view of the field hides the underlying mechanism evolution.
+
+YOLO never was a route with its own physics. Decomposing YOLO from v1 to the latest versions shows combinatorial migration across the five basic components:
+
+- **YOLOv1** occupies the primitive combination: dense grid carriers, globally flattened feature sampling, static geometric assignment, no multi-scale fusion.
+- **YOLOv2 through YOLOv7** migrated wholesale into dense anchor carriers, fully convolutional local feature sampling, feature-pyramid multi-scale fusion (top-down FPN plus bottom-up PANet), and IoU-based dynamic one-to-many label assignment (e.g. OTA and SimOTA). Backbones deepened, fusion topologies densified, and dynamic positive-sample policies smoothed over this long stretch, but the fundamental combination stayed inside dense-anchors-plus-one-to-many territory.
+- **YOLOv8 and YOLOv9** made their core structural move in the carrier component: dropping preset anchor templates for FCOS-like point regression with distributed box representations (Task-Aligned Assigner and DFL). This marked the family's full carrier-level shift to anchor-free.
+- **YOLOv10** then operated on the label-assignment component, introducing consistent dual assignment that keeps one-to-many training guidance while running the inference branch under one-to-one protocol, cutting NMS out of post-processing.
+
+## Carrier choice dictates overall system design
+
+The modules of a detection system relate through a clear dependency: **how prediction carriers bind to spatial coordinates determines the concrete form of feature extraction and sample matching downstream.**
+
+If carriers bind to the feature map's spatial grid (grids, anchors, or feature points), sampling must use matching local-window convolutions, assignment must select positives in spatial neighborhoods by geometric rules or dynamic metrics while handling dense-sampling background redundancy, and inference needs NMS to suppress overlapping boxes. If carriers unbind from the grid as query vectors, sampling needs global attention to aggregate context, and assignment achieves one-to-one prediction through bipartite matching, dropping NMS.
+
+The prediction carrier establishes the network's most basic output protocol. Part 1 starts here: [Part 1: Prediction Carriers](./prediction-carrier).
