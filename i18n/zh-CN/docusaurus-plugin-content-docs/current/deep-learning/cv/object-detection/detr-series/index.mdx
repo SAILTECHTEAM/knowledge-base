@@ -1,0 +1,85 @@
+---
+sidebar_position: 1
+title: "概述"
+description: "DETR 系列检测器演进路线图：从直接集合预测到实时端到端检测。"
+---
+
+# 概述
+
+在 DETR（Detection Transformer，Carion 等人，2020）出现之前，现代目标检测领域几乎被基于密集候选（Dense Candidates）的范式所垄断。无论是基于锚框（Anchor-based）的 Faster R-CNN、RetinaNet，还是无锚框（Anchor-free）的 FCOS、CenterNet，它们的底层逻辑高度一致：在图像特征图的密集空间位置上铺设成千上万个候选点或候选框，让网络去预测每一个候选位置上是否存在目标以及对应的偏移量。
+
+密集预测范式带来了两个长期存在且难以根除的工程包袱：**一对多正负样本分配（One-to-Many Label Assignment）** 与 **非极大值抑制（NMS，Non-Maximum Suppression）**。DETR 的核心贡献，在于从第一性原理出发，彻底重构了目标检测的建模方式：**将目标检测直接定义为一个直接集合预测（Direct Set Prediction）问题**。DETR 不在特征图上做密集滑动扫描，而是维护一组固定容量的 Object Query，通过一对一二分图匹配把 $N$ 个预测与 $M$ 个真实目标精确对齐，从而在整条流水线中移除 NMS。
+
+原版 DETR 在工程实践中暴露出两个严重的瓶颈，也构成了后续 DETR 改进研究的主线：一是注意力全局扫描与二分图匹配震荡带来的慢收敛，二是密集注意力的二次方计算复杂度将模型限制在单一低分辨率特征尺度上。本系列顺着约束链而不是论文版本史展开，逐篇追一个问题被提出、被改写、又被新的约束顶回来的过程。
+
+## 系列文章规划
+
+### [第 1 篇：原版 DETR——网络架构与前向流程](./detr-v1-architecture-forward-pass)
+
+解析变长无序集合与定长网络矛盾、CNN 主干、二维位置编码、Transformer 编码器与 Object Query 的工作机制。
+
+### [第 2 篇：原版 DETR——二分图匹配与集合损失](./detr-v1-bipartite-matching-set-loss)
+
+深入剖析排列不变性、匈牙利算法最优匹配、匹配代价与集合损失函数的构建，以及一对一匹配如何内化 NMS。
+
+### [第 3 篇：Deformable DETR——稀疏采样与多尺度注意力](./deformable-detr)
+
+解析局部稀疏采样机制、多尺度可变形注意力、Reference Point 接口及特征读取机制重构。参考点上的稀疏采样取代全局稠密注意力，使 DETR 直接使用高分辨率多尺度特征图，收敛速度加快了近 10 倍。
+
+### [第 4 篇：Conditional 与 DAB-DETR——查询空间化](./conditional-dab-detr)
+
+分析 Object Query 的空间含义，对比 conditional spatial query 与显式 4D 动态锚框 $(x, y, w, h)$ 设计，使交叉注意力的寻址目标明确化。
+
+### [第 5 篇：DN-DETR——查询去噪与早期匹配稳定化](./dn-detr)
+
+剖析一对一匹配的震荡机理，详解目标级去噪查询构造、注意力掩码设计与训练加速原理。去噪训练旁路绕过匈牙利匹配的不稳定性，直接提供确定性梯度。
+
+### [第 6 篇：DINO——三处接口的联合设计](./dino)
+
+解析对比式去噪（Contrastive DeNoising）、混合查询选择（Mixed Query Selection）与 Look Forward Twice 机制的三接口协同。
+
+### [第 7 篇：Group DETR——训练期查询分组](./group-detr)
+
+剖析一对一匹配造成的正样本稀疏，解析多组查询、组间隔离自注意力与组内独立匹配，以及训练与推理的不对称实现。
+
+### [第 8 篇：D-FINE——边界框分布细化与定位自蒸馏](./d-fine)
+
+把逐层的点估计换成边界距离的离散分布，解析逐层区间收缩、期望解码与全局最优定位自蒸馏。
+
+### [第 9 篇：DEIM——密集匹配与匹配质量约束](./deim)
+
+分析增密一对一匹配带来的低质量匹配，拆解密集一对一的样本构造与可匹配性感知损失（Matchability-Aware Loss）。密集化正样本在保留端到端推理的同时，提高了训练期每个真值对应的正样本利用率。
+
+### [第 10 篇：RT-DETR 与 RT-DETRv2——延迟预算与算子约束](./rt-detr)
+
+端到端延迟的构成与测量口径、混合编码器（AIFI 与 CCFM）、不确定性最小的编码器查询选择、可伸缩的解码器层数，以及 v2 的按尺度分配采样点数与可部署的离散采样。到这一步，Transformer 检测器在兼顾无 NMS 优势的同时，已经在推理速度与精度上匹敌甚至超越先进 YOLO 系列。
+
+## 演进时间线
+
+| 模型 | 年份 | 关键创新 | 学习笔记 |
+| :--- | :--- | :--- | :--- |
+| DETR | 2020 | 直接集合预测、二分图匹配、无 NMS 推理 | — |
+| Deformable DETR | 2021 | 多尺度可变形注意力、参考点稀疏采样 | — |
+| Conditional DETR | 2021 | 条件空间查询，解耦内容与空间注意力 | — |
+| DAB-DETR | 2022 | 显式 4D 动态锚框作为查询 | — |
+| DN-DETR | 2022 | 去噪训练稳定二分图匹配 | — |
+| DINO | 2022 | 对比式去噪、混合查询选择、Look Forward Twice | — |
+| Group DETR | 2022 | 训练期组级一对多分配 | — |
+| RT-DETR | 2023 | 混合编码器、不确定性最小查询选择、实时延迟 | — |
+| D-FINE | 2024 | 细粒度边界框分布细化、定位自蒸馏 | — |
+| DEIM | 2024 | 密集一对一匹配、可匹配性感知损失 | — |
+| RT-DETRv2 | 2024 | 按尺度分配采样点、可部署离散采样、改进基线 | — |
+
+## 参考文献
+
+- N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and S. Zagoruyko, *End-to-End Object Detection with Transformers* (2020) — [arXiv:2005.12872](https://arxiv.org/abs/2005.12872)
+- X. Zhu, W. Su, L. Lu, B. Li, X. Wang, and J. Dai, *Deformable DETR: Deformable Transformers for End-to-End Object Detection* (2021) — [arXiv:2010.04159](https://arxiv.org/abs/2010.04159)
+- D. Meng, X. Chen, Z. Fan, G. Zeng, Y. Li, Y. Sun, K. Shen, and L. Shao, *Conditional DETR: An Explicit Conditioning Perspective for End-to-End Object Detection* (2021) — [arXiv:2108.06152](https://arxiv.org/abs/2108.06152)
+- S. Liu, F. Li, H. Zhang, X. Yang, Y. Xie, M. Ni, L. Shao, and C. Zhang, *DAB-DETR: Dynamic Anchor Boxes are Better Queries for DETR* (2022) — [arXiv:2201.12329](https://arxiv.org/abs/2201.12329)
+- F. Li, H. Zhang, S. Liu, J. Guo, L. M. Ni, and P. Zhang, *DN-DETR: Accelerate DETR Training by Introducing Query DeNoising* (2022) — [arXiv:2203.01305](https://arxiv.org/abs/2203.01305)
+- H. Zhang, F. Li, S. Liu, L. Zhang, H. Su, J. Zhu, L. M. Ni, and H.-Y. Shum, *DINO: DETR with Improved DeNoising Anchor Boxes for End-to-End Object Detection* (2022) — [arXiv:2203.03605](https://arxiv.org/abs/2203.03605)
+- S. Chen, X. Sun, S. He, and S. Xu, *Group DETR: Fast DETR Training with Group-wise One-to-Many Assignment* (2022) — [arXiv:2207.13085](https://arxiv.org/abs/2207.13085)
+- Y. Zhao, B. Xu, and Z. Lv, *DETRs Beat YOLOs on Real-time Object Detection* (2023) — [arXiv:2304.08069](https://arxiv.org/abs/2304.08069)
+- S. Peng, K. Wu, S. Chen, H. Feng, C. Zhou, and L. Shao, *D-FINE: Redefine Regression Task in DETR as Fine-grained Distribution Refinement* (2024) — [arXiv:2410.13842](https://arxiv.org/abs/2410.13842)
+- S. Huang, H. Feng, C. Du, S. Peng, D. Zhao, and L. Shao, *DEIM: DETR with Improved Matching for Fast Convergence* (2024) — [arXiv:2412.04234](https://arxiv.org/abs/2412.04234)
+- W. Lv, S. Xu, Y. Zhao, G. Wang, J. Wei, C. Cui, and Q. Dang, *RT-DETRv2: Improved Baseline with Denoising and Real-Detection Friendly Queries* (2024) — [arXiv:2407.17140](https://arxiv.org/abs/2407.17140)
